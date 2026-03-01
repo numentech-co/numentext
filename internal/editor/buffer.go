@@ -36,6 +36,9 @@ func NewBuffer() *Buffer {
 }
 
 func NewBufferFromText(text string) *Buffer {
+	// Normalize line endings: CRLF -> LF, CR -> LF
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
 	lines := strings.Split(text, "\n")
 	if len(lines) == 0 {
 		lines = []string{""}
@@ -58,6 +61,24 @@ func (b *Buffer) Line(row int) string {
 		return ""
 	}
 	return b.lines[row]
+}
+
+func (b *Buffer) ReplaceLine(row int, text string) {
+	if row < 0 || row >= len(b.lines) {
+		return
+	}
+	oldText := b.lines[row]
+	op := EditOp{
+		Type:         OpDelete,
+		Text:         oldText,
+		OldText:      text,
+		CursorBefore: [2]int{row, len(oldText)},
+		CursorAfter:  [2]int{row, len(text)},
+	}
+	b.undoStack = append(b.undoStack, op)
+	b.redoStack = nil
+	b.lines[row] = text
+	b.modified = true
 }
 
 func (b *Buffer) Text() string {

@@ -15,8 +15,9 @@ type MenuItem struct {
 
 // Menu represents a dropdown menu
 type Menu struct {
-	Label string
-	Items []*MenuItem
+	Label  string
+	Items  []*MenuItem
+	OnOpen func() // Called before the dropdown opens, for dynamic menus
 }
 
 // MenuBar is a horizontal menu bar with dropdown support
@@ -59,6 +60,9 @@ func (mb *MenuBar) Close() {
 
 func (mb *MenuBar) Open(menuIdx int) {
 	if menuIdx >= 0 && menuIdx < len(mb.menus) {
+		if mb.menus[menuIdx].OnOpen != nil {
+			mb.menus[menuIdx].OnOpen()
+		}
 		mb.activeMenu = menuIdx
 		mb.activeItem = 0
 		mb.dropdownOpen = true
@@ -169,11 +173,17 @@ func (mb *MenuBar) InputHandler() func(event *tcell.EventKey, setFocus func(p tv
 			if mb.activeMenu < 0 {
 				mb.activeMenu = len(mb.menus) - 1
 			}
+			if mb.menus[mb.activeMenu].OnOpen != nil {
+				mb.menus[mb.activeMenu].OnOpen()
+			}
 			mb.activeItem = 0
 		case tcell.KeyRight:
 			mb.activeMenu++
 			if mb.activeMenu >= len(mb.menus) {
 				mb.activeMenu = 0
+			}
+			if mb.menus[mb.activeMenu].OnOpen != nil {
+				mb.menus[mb.activeMenu].OnOpen()
 			}
 			mb.activeItem = 0
 		case tcell.KeyUp:

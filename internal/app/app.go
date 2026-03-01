@@ -4,15 +4,19 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"numentext/internal/config"
+	"numentext/internal/dap"
 	"numentext/internal/editor"
 	"numentext/internal/filetree"
+	"numentext/internal/lsp"
 	"numentext/internal/output"
 	"numentext/internal/runner"
+	"numentext/internal/terminal"
 	"numentext/internal/ui"
 )
 
@@ -28,6 +32,18 @@ type App struct {
 	runner    *runner.Runner
 	config    *config.Config
 	workDir   string
+
+	// Terminal
+	termPanel    *terminal.Panel
+	term         *terminal.Terminal
+	termVisible  bool
+	bottomFlex   *tview.Flex
+
+	// LSP
+	lspManager *lsp.Manager
+
+	// DAP
+	dapManager *dap.Manager
 }
 
 func New() *App {
@@ -42,6 +58,8 @@ func New() *App {
 	a.setupUI()
 	a.setupMenus()
 	a.setupKeybindings()
+	a.setupLSP()
+	a.setupDAP()
 
 	return a
 }
@@ -49,10 +67,12 @@ func New() *App {
 func (a *App) setupUI() {
 	// Create components
 	a.editor = editor.NewEditor()
+	a.editor.SetShowLineNumbers(a.config.ShowLineNum)
 	a.menuBar = ui.NewMenuBar()
 	a.statusBar = ui.NewStatusBar()
 	a.fileTree = filetree.New(a.workDir)
 	a.output = output.New()
+	a.termPanel = terminal.NewPanel()
 
 	// Wire callbacks
 	a.editor.SetOnChange(func() {
@@ -74,8 +94,12 @@ func (a *App) setupUI() {
 		a.tviewApp.SetFocus(a.editor)
 	})
 
+	// Bottom panel: output by default, can switch to terminal
+	a.bottomFlex = tview.NewFlex()
+	a.bottomFlex.AddItem(a.output, 0, 1, false)
+
 	// Create layout
-	a.layout = ui.NewLayout(a.menuBar, a.fileTree, a.editor, a.output, a.statusBar)
+	a.layout = ui.NewLayout(a.menuBar, a.fileTree, a.editor, a.bottomFlex, a.statusBar)
 
 	a.tviewApp.SetRoot(a.layout.Pages, true)
 	a.tviewApp.SetFocus(a.editor)
@@ -83,17 +107,13 @@ func (a *App) setupUI() {
 }
 
 func (a *App) setupMenus() {
-	// File menu
+	// File menu — rebuilt on each open to include recent files
 	fileMenu := &ui.Menu{
 		Label: "File",
-		Items: []*ui.MenuItem{
-			{Label: "New", Shortcut: "Ctrl+N", Action: a.newFile},
-			{Label: "Open...", Shortcut: "Ctrl+O", Action: a.openFile},
-			{Label: "Save", Shortcut: "Ctrl+S", Action: a.saveFile},
-			{Label: "Save As...", Shortcut: "Ctrl+Shift+S", Action: a.saveFileAs},
-			{Label: "Close Tab", Shortcut: "Ctrl+W", Action: a.closeTab},
-			{Label: "Exit", Shortcut: "Ctrl+Q", Action: a.quit},
-		},
+		Items: a.buildFileMenuItems(),
+	}
+	fileMenu.OnOpen = func() {
+		fileMenu.Items = a.buildFileMenuItems()
 	}
 
 	// Edit menu
@@ -116,6 +136,8 @@ func (a *App) setupMenus() {
 			{Label: "Find...", Shortcut: "Ctrl+F", Action: a.showFind},
 			{Label: "Replace...", Shortcut: "Ctrl+H", Action: a.showReplace},
 			{Label: "Go to Line...", Shortcut: "Ctrl+G", Action: a.showGoToLine},
+			{Label: "Go to Definition", Shortcut: "F12", Action: a.goToDefinition},
+			{Label: "Hover Info", Shortcut: "F11", Action: a.showHover},
 		},
 	}
 
@@ -129,10 +151,26 @@ func (a *App) setupMenus() {
 		},
 	}
 
+	// Debug menu
+	debugMenu := &ui.Menu{
+		Label: "Debug",
+		Items: []*ui.MenuItem{
+			{Label: "Start Debug", Shortcut: "F5", Action: a.startDebug},
+			{Label: "Toggle Breakpoint", Shortcut: "F8", Action: a.toggleBreakpoint},
+			{Label: "Continue", Shortcut: "F6", Action: a.debugContinue},
+			{Label: "Step Over", Shortcut: "F7", Action: a.debugStepOver},
+			{Label: "Step In", Action: a.debugStepIn},
+			{Label: "Step Out", Action: a.debugStepOut},
+			{Label: "Stop Debug", Action: a.stopDebug},
+		},
+	}
+
 	// Tools menu
 	toolsMenu := &ui.Menu{
 		Label: "Tools",
 		Items: []*ui.MenuItem{
+			{Label: "Terminal", Shortcut: "Ctrl+`", Action: a.toggleTerminal},
+			{Label: "Restart LSP", Action: a.restartLSP},
 			{Label: "Clear Output", Action: func() { a.output.Clear() }},
 			{Label: "Refresh File Tree", Action: func() { a.fileTree.Refresh() }},
 		},
@@ -144,6 +182,7 @@ func (a *App) setupMenus() {
 		Items: []*ui.MenuItem{
 			{Label: "Toggle Line Numbers", Action: func() {
 				a.config.ShowLineNum = !a.config.ShowLineNum
+				a.editor.SetShowLineNumbers(a.config.ShowLineNum)
 				a.config.Save()
 			}},
 		},
@@ -171,10 +210,54 @@ func (a *App) setupMenus() {
 	a.menuBar.AddMenu(editMenu)
 	a.menuBar.AddMenu(searchMenu)
 	a.menuBar.AddMenu(runMenu)
+	a.menuBar.AddMenu(debugMenu)
 	a.menuBar.AddMenu(toolsMenu)
 	a.menuBar.AddMenu(optionsMenu)
 	a.menuBar.AddMenu(windowMenu)
 	a.menuBar.AddMenu(helpMenu)
+}
+
+func (a *App) buildFileMenuItems() []*ui.MenuItem {
+	items := []*ui.MenuItem{
+		{Label: "New", Shortcut: "Ctrl+N", Action: a.newFile},
+		{Label: "Open...", Shortcut: "Ctrl+O", Action: a.openFile},
+		{Label: "Save", Shortcut: "Ctrl+S", Action: a.saveFile},
+		{Label: "Save As...", Action: a.saveFileAs},
+		{Label: "Close Tab", Shortcut: "Ctrl+W", Action: a.closeTab},
+	}
+
+	// Add recent files if any
+	if len(a.config.RecentFiles) > 0 {
+		items = append(items, &ui.MenuItem{Label: "---", Disabled: true})
+		max := len(a.config.RecentFiles)
+		if max > 10 {
+			max = 10
+		}
+		for i := 0; i < max; i++ {
+			path := a.config.RecentFiles[i]
+			// Extract just the filename for display
+			parts := strings.Split(path, "/")
+			name := parts[len(parts)-1]
+			p := path // capture for closure
+			items = append(items, &ui.MenuItem{
+				Label:  name,
+				Action: func() { a.openRecentFile(p) },
+			})
+		}
+	}
+
+	items = append(items, &ui.MenuItem{Label: "---", Disabled: true})
+	items = append(items, &ui.MenuItem{Label: "Exit", Shortcut: "Ctrl+Q", Action: a.quit})
+
+	return items
+}
+
+func (a *App) openRecentFile(path string) {
+	err := a.editor.OpenFile(path)
+	if err != nil {
+		a.output.AppendError("Error opening file: " + err.Error())
+	}
+	a.tviewApp.SetFocus(a.editor)
 }
 
 func (a *App) setupKeybindings() {
@@ -208,13 +291,39 @@ func (a *App) setupKeybindings() {
 				// Let the dialog handle Escape
 				return event
 			}
+			// If terminal has focus, return to editor
+			if a.termPanel.HasFocus() {
+				a.tviewApp.SetFocus(a.editor)
+				return nil
+			}
 			// Return focus to editor from file tree/output
 			a.tviewApp.SetFocus(a.editor)
 			return nil
+		case tcell.KeyF6:
+			a.debugContinue()
+			return nil
+		case tcell.KeyF7:
+			a.debugStepOver()
+			return nil
+		case tcell.KeyF8:
+			a.toggleBreakpoint()
+			return nil
+		case tcell.KeyF11:
+			a.showHover()
+			return nil
+		case tcell.KeyF12:
+			a.goToDefinition()
+			return nil
 		case tcell.KeyF5:
+			if a.termPanel.HasFocus() {
+				return event // let terminal handle it
+			}
 			a.runFile()
 			return nil
 		case tcell.KeyF9:
+			if a.termPanel.HasFocus() {
+				return event
+			}
 			a.buildFile()
 			return nil
 		case tcell.KeyF10:
@@ -224,6 +333,9 @@ func (a *App) setupKeybindings() {
 		case tcell.KeyRune:
 			if ctrl {
 				switch event.Rune() {
+				case '`':
+					a.toggleTerminal()
+					return nil
 				case 'n':
 					a.newFile()
 					return nil
@@ -281,6 +393,10 @@ func (a *App) updateStatusBar() {
 	tab := a.editor.ActiveTab()
 	if tab != nil {
 		a.statusBar.Update(tab.Name, tab.CursorRow, tab.CursorCol, tab.Highlighter.Language(), tab.Buffer.Modified())
+		// Show diagnostic message if cursor is on a diagnostic line
+		if diag, ok := a.editor.DiagnosticAtLine(tab.CursorRow); ok {
+			a.statusBar.SetMessage(diag.Message)
+		}
 	} else {
 		a.statusBar.Update("", 0, 0, "", false)
 		a.statusBar.SetMessage("NumenText - Press Ctrl+N for new file, Ctrl+O to open")
@@ -618,7 +734,282 @@ func (a *App) showShortcuts() {
 	a.layout.ShowDialog("shortcuts", modal)
 }
 
+func (a *App) setupLSP() {
+	a.lspManager = lsp.NewManager(a.workDir)
+	a.lspManager.OnStatus = func(msg string) {
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.statusBar.SetMessage(msg)
+		})
+	}
+	a.lspManager.OnDiagnostics = func(params lsp.PublishDiagnosticsParams) {
+		a.tviewApp.QueueUpdateDraw(func() {
+			// Convert LSP diagnostics to editor format
+			filePath := lsp.URIToPath(params.URI)
+			diags := make(map[int]editor.DiagnosticInfo)
+			for _, d := range params.Diagnostics {
+				diags[d.Range.Start.Line] = editor.DiagnosticInfo{
+					Severity: d.Severity,
+					Message:  d.Message,
+				}
+			}
+			a.editor.SetDiagnostics(filePath, diags)
+
+			count := len(params.Diagnostics)
+			if count > 0 {
+				a.statusBar.SetMessage(fmt.Sprintf("%d diagnostic(s)", count))
+			}
+		})
+	}
+
+	// Wire editor callbacks for LSP notifications
+	a.editor.SetOnFileOpen(func(filePath, text string) {
+		go a.lspManager.NotifyOpen(filePath, text)
+	})
+	a.editor.SetOnFileChange(func(filePath, text string) {
+		go a.lspManager.NotifyChange(filePath, text)
+	})
+	a.editor.SetOnFileClose(func(filePath string) {
+		go a.lspManager.NotifyClose(filePath)
+	})
+
+	// Completion
+	a.editor.SetOnRequestComplete(func(filePath string, row, col int, callback func([]editor.CompletionItem)) {
+		go func() {
+			client := a.lspManager.ClientForFile(filePath)
+			if client == nil {
+				return
+			}
+			items, err := client.Completion(filePath, row, col)
+			if err != nil || len(items) == 0 {
+				return
+			}
+			// Convert LSP items to editor items
+			editorItems := make([]editor.CompletionItem, len(items))
+			for i, item := range items {
+				insertText := item.InsertText
+				if insertText == "" {
+					insertText = item.Label
+				}
+				editorItems[i] = editor.CompletionItem{
+					Label:      item.Label,
+					Detail:     item.Detail,
+					InsertText: insertText,
+					Kind:       item.Kind,
+				}
+			}
+			a.tviewApp.QueueUpdateDraw(func() {
+				callback(editorItems)
+			})
+		}()
+	})
+}
+
+func (a *App) goToDefinition() {
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return
+	}
+	filePath := tab.FilePath
+	row := tab.CursorRow
+	col := tab.CursorCol
+
+	go func() {
+		client := a.lspManager.ClientForFile(filePath)
+		if client == nil {
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.statusBar.SetMessage("No language server available")
+			})
+			return
+		}
+		locs, err := client.Definition(filePath, row, col)
+		if err != nil || len(locs) == 0 {
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.statusBar.SetMessage("No definition found")
+			})
+			return
+		}
+		loc := locs[0]
+		targetPath := lsp.URIToPath(loc.URI)
+		targetLine := loc.Range.Start.Line
+
+		a.tviewApp.QueueUpdateDraw(func() {
+			if targetPath != filePath {
+				if err := a.editor.OpenFile(targetPath); err != nil {
+					a.statusBar.SetMessage("Cannot open: " + err.Error())
+					return
+				}
+			}
+			a.editor.GoToLine(targetLine + 1) // GoToLine is 1-based
+			a.statusBar.SetMessage(fmt.Sprintf("Definition: %s:%d", targetPath, targetLine+1))
+		})
+	}()
+}
+
+func (a *App) showHover() {
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return
+	}
+	filePath := tab.FilePath
+	row := tab.CursorRow
+	col := tab.CursorCol
+
+	go func() {
+		client := a.lspManager.ClientForFile(filePath)
+		if client == nil {
+			return
+		}
+		hover, err := client.Hover(filePath, row, col)
+		if err != nil || hover == nil {
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.statusBar.SetMessage("No hover information")
+			})
+			return
+		}
+		// Show hover content in status bar (single line)
+		content := hover.Contents.Value
+		// Strip markdown code fences
+		content = strings.ReplaceAll(content, "```go\n", "")
+		content = strings.ReplaceAll(content, "```\n", "")
+		content = strings.ReplaceAll(content, "```", "")
+		content = strings.TrimSpace(content)
+		// Take first line only for status bar
+		if idx := strings.Index(content, "\n"); idx >= 0 {
+			content = content[:idx]
+		}
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.statusBar.SetMessage(content)
+		})
+	}()
+}
+
+func (a *App) setupDAP() {
+	a.dapManager = dap.NewManager()
+	a.dapManager.OnStatus = func(msg string) {
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.statusBar.SetMessage(msg)
+		})
+	}
+	a.dapManager.OnOutput = func(text string) {
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.output.AppendText(text)
+		})
+	}
+	a.dapManager.OnStopped = func(file string, line int, reason string) {
+		a.tviewApp.QueueUpdateDraw(func() {
+			if file != "" {
+				tab := a.editor.ActiveTab()
+				if tab == nil || tab.FilePath != file {
+					_ = a.editor.OpenFile(file)
+				}
+				a.editor.GoToLine(line)
+			}
+			a.statusBar.SetMessage(fmt.Sprintf("Stopped: %s (line %d)", reason, line))
+		})
+	}
+	a.dapManager.OnTerminated = func() {
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.statusBar.SetMessage("Debug session ended")
+		})
+	}
+
+	// Wire breakpoint display in editor gutter
+	a.editor.SetHasBreakpoint(func(filePath string, line int) bool {
+		return a.dapManager.HasBreakpoint(filePath, line)
+	})
+}
+
+func (a *App) startDebug() {
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		a.statusBar.SetMessage("No file to debug")
+		return
+	}
+	if tab.Buffer.Modified() {
+		_ = a.editor.SaveCurrentFile()
+	}
+	a.output.Clear()
+	go a.dapManager.StartSession(tab.FilePath)
+}
+
+func (a *App) stopDebug() {
+	a.dapManager.StopSession()
+}
+
+func (a *App) toggleBreakpoint() {
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return
+	}
+	a.dapManager.ToggleBreakpoint(tab.FilePath, tab.CursorRow+1) // DAP uses 1-based lines
+}
+
+func (a *App) debugContinue() {
+	a.dapManager.Continue()
+}
+
+func (a *App) debugStepOver() {
+	a.dapManager.StepOver()
+}
+
+func (a *App) debugStepIn() {
+	a.dapManager.StepIn()
+}
+
+func (a *App) debugStepOut() {
+	a.dapManager.StepOut()
+}
+
+func (a *App) restartLSP() {
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		a.statusBar.SetMessage("No file open for LSP restart")
+		return
+	}
+	go a.lspManager.RestartForFile(tab.FilePath)
+}
+
+func (a *App) toggleTerminal() {
+	if a.termVisible {
+		a.closeTerminal()
+	} else {
+		a.openTerminal()
+	}
+}
+
+func (a *App) openTerminal() {
+	if a.term == nil {
+		a.term = terminal.NewTerminal(80, 24)
+		a.termPanel.SetTerminal(a.term)
+		a.term.SetOnData(func() {
+			a.tviewApp.QueueUpdateDraw(func() {})
+		})
+		err := a.term.Start("")
+		if err != nil {
+			a.output.AppendError("Failed to start terminal: " + err.Error())
+			return
+		}
+	}
+
+	a.bottomFlex.Clear()
+	a.bottomFlex.AddItem(a.termPanel, 0, 1, true)
+	a.termVisible = true
+	a.tviewApp.SetFocus(a.termPanel)
+}
+
+func (a *App) closeTerminal() {
+	a.bottomFlex.Clear()
+	a.bottomFlex.AddItem(a.output, 0, 1, false)
+	a.termVisible = false
+	a.tviewApp.SetFocus(a.editor)
+}
+
 // Run starts the application
 func (a *App) Run() error {
+	defer a.lspManager.StopAll()
+	defer a.dapManager.StopSession()
+	if a.term != nil {
+		defer a.term.Stop()
+	}
 	return a.tviewApp.Run()
 }

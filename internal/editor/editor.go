@@ -37,19 +37,52 @@ type Editor struct {
 	pageHeight  int
 	onChange    func()
 	onTabChange func()
-	hasFocus    bool
-	cachedHL    []HighlightedLine
-	cachedHLVer int
-	hlVersion   int
+	hasFocus       bool
+	showLineNumbers bool
+	cachedHL       []HighlightedLine
+	cachedHLVer    int
+	hlVersion      int
+
+	// LSP callbacks
+	onFileOpen   func(filePath, text string)
+	onFileChange func(filePath, text string)
+	onFileClose  func(filePath string)
+
+	// Completion
+	completion         *CompletionPopup
+	onRequestComplete  func(filePath string, row, col int, callback func([]CompletionItem))
+
+	// Diagnostics: filePath -> line -> severity (1=error, 2=warning, 3=info, 4=hint)
+	diagnostics map[string]map[int]DiagnosticInfo
+
+	// Breakpoint check callback (returns true if breakpoint at 1-based line)
+	hasBreakpoint func(filePath string, line int) bool
+}
+
+// DiagnosticInfo holds diagnostic data for a single line
+type DiagnosticInfo struct {
+	Severity int    // 1=error, 2=warning, 3=info, 4=hint
+	Message  string
 }
 
 func NewEditor() *Editor {
 	e := &Editor{
-		Box:  tview.NewBox(),
-		tabs: []*Tab{},
+		Box:             tview.NewBox(),
+		tabs:            []*Tab{},
+		showLineNumbers: true,
+		completion:      NewCompletionPopup(),
+		diagnostics:     make(map[string]map[int]DiagnosticInfo),
 	}
 	e.SetBorder(false)
 	return e
+}
+
+func (e *Editor) SetShowLineNumbers(show bool) {
+	e.showLineNumbers = show
+}
+
+func (e *Editor) ShowLineNumbers() bool {
+	return e.showLineNumbers
 }
 
 func (e *Editor) SetOnChange(fn func()) {
@@ -60,10 +93,37 @@ func (e *Editor) SetOnTabChange(fn func()) {
 	e.onTabChange = fn
 }
 
+func (e *Editor) SetOnFileOpen(fn func(filePath, text string)) {
+	e.onFileOpen = fn
+}
+
+func (e *Editor) SetOnFileChange(fn func(filePath, text string)) {
+	e.onFileChange = fn
+}
+
+func (e *Editor) SetOnFileClose(fn func(filePath string)) {
+	e.onFileClose = fn
+}
+
+func (e *Editor) SetOnRequestComplete(fn func(filePath string, row, col int, callback func([]CompletionItem))) {
+	e.onRequestComplete = fn
+}
+
+// Completion returns the completion popup for external drawing
+func (e *Editor) Completion() *CompletionPopup {
+	return e.completion
+}
+
 func (e *Editor) notifyChange() {
 	e.hlVersion++
 	if e.onChange != nil {
 		e.onChange()
+	}
+	if e.onFileChange != nil {
+		tab := e.ActiveTab()
+		if tab != nil && tab.FilePath != "" {
+			e.onFileChange(tab.FilePath, tab.Buffer.Text())
+		}
 	}
 }
 
@@ -87,6 +147,120 @@ func (e *Editor) notifyTabChange() {
 	if e.onTabChange != nil {
 		e.onTabChange()
 	}
+}
+
+// SetHasBreakpoint sets the callback to check for breakpoints
+func (e *Editor) SetHasBreakpoint(fn func(filePath string, line int) bool) {
+	e.hasBreakpoint = fn
+}
+
+// Diagnostics methods
+
+// SetDiagnostics updates the diagnostics for a file
+func (e *Editor) SetDiagnostics(filePath string, diags map[int]DiagnosticInfo) {
+	if len(diags) == 0 {
+		delete(e.diagnostics, filePath)
+	} else {
+		e.diagnostics[filePath] = diags
+	}
+}
+
+// DiagnosticAtLine returns the diagnostic for the active file at the given line, if any
+func (e *Editor) DiagnosticAtLine(line int) (DiagnosticInfo, bool) {
+	tab := e.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return DiagnosticInfo{}, false
+	}
+	diags, ok := e.diagnostics[tab.FilePath]
+	if !ok {
+		return DiagnosticInfo{}, false
+	}
+	d, ok := diags[line]
+	return d, ok
+}
+
+// Completion methods
+
+func (e *Editor) maybeRequestCompletion(ch rune) {
+	if e.onRequestComplete == nil {
+		return
+	}
+	// Trigger on dot (member access) or after typing identifier chars
+	if ch != '.' {
+		return
+	}
+	tab := e.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return
+	}
+	row := tab.CursorRow
+	col := tab.CursorCol
+	filePath := tab.FilePath
+	e.onRequestComplete(filePath, row, col, func(items []CompletionItem) {
+		if len(items) == 0 {
+			return
+		}
+		e.completion.Show(items, "", row, col)
+	})
+}
+
+func (e *Editor) updateCompletionPrefix() {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return
+	}
+	// Get the text from startCol to cursor
+	line := tab.Buffer.Line(tab.CursorRow)
+	startCol := e.completion.StartCol()
+	if startCol < 0 {
+		startCol = 0
+	}
+	endCol := tab.CursorCol
+	if endCol > len(line) {
+		endCol = len(line)
+	}
+	if startCol > endCol {
+		e.completion.Hide()
+		return
+	}
+	prefix := line[startCol:endCol]
+	e.completion.UpdatePrefix(prefix)
+}
+
+func (e *Editor) acceptCompletion() {
+	item := e.completion.Selected()
+	if item == nil {
+		e.completion.Hide()
+		return
+	}
+	tab := e.ActiveTab()
+	if tab == nil {
+		e.completion.Hide()
+		return
+	}
+
+	// Replace from startCol to cursor with the completion text
+	insertText := item.InsertText
+	if insertText == "" {
+		insertText = item.Label
+	}
+	startCol := e.completion.StartCol()
+	line := tab.Buffer.Line(tab.CursorRow)
+
+	// Build new line
+	prefix := ""
+	if startCol > 0 && startCol <= len(line) {
+		prefix = line[:startCol]
+	}
+	suffix := ""
+	if tab.CursorCol < len(line) {
+		suffix = line[tab.CursorCol:]
+	}
+	newLine := prefix + insertText + suffix
+	tab.Buffer.ReplaceLine(tab.CursorRow, newLine)
+	tab.CursorCol = startCol + len(insertText)
+	e.completion.Hide()
+	e.notifyChange()
 }
 
 // Tab management
@@ -129,6 +303,9 @@ func (e *Editor) OpenFile(filePath string) error {
 	parts := strings.Split(filePath, "/")
 	name := parts[len(parts)-1]
 	e.NewTab(name, filePath, content)
+	if e.onFileOpen != nil && filePath != "" {
+		e.onFileOpen(filePath, content)
+	}
 	return nil
 }
 
@@ -163,12 +340,16 @@ func (e *Editor) CloseTab(idx int) {
 	if idx < 0 || idx >= len(e.tabs) {
 		return
 	}
+	closedTab := e.tabs[idx]
 	e.tabs = append(e.tabs[:idx], e.tabs[idx+1:]...)
 	if e.activeTab >= len(e.tabs) {
 		e.activeTab = len(e.tabs) - 1
 	}
 	if e.activeTab < 0 {
 		e.activeTab = 0
+	}
+	if e.onFileClose != nil && closedTab.FilePath != "" {
+		e.onFileClose(closedTab.FilePath)
 	}
 	e.notifyTabChange()
 	e.notifyChange()
@@ -818,7 +999,10 @@ func (e *Editor) Draw(screen tcell.Screen) {
 	}
 
 	// Calculate gutter width
-	gutterW := GutterWidth(tab.Buffer.LineCount())
+	gutterW := 0
+	if e.showLineNumbers {
+		gutterW = GutterWidth(tab.Buffer.LineCount())
+	}
 
 	// Highlight all lines (cached)
 	if e.cachedHLVer != e.hlVersion || e.cachedHL == nil {
@@ -843,11 +1027,55 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		}
 
 		// Draw gutter
-		gutterStr := FormatGutterLine(lineIdx+1, tab.Buffer.LineCount())
-		for i, ch := range gutterStr {
-			if x+i < x+gutterW {
-				screen.SetContent(x+i, y+row, ch, nil, tcell.StyleDefault.Foreground(ui.ColorGutterText).Background(ui.ColorGutterBg))
+		if e.showLineNumbers {
+			gutterStr := FormatGutterLine(lineIdx+1, tab.Buffer.LineCount())
+			gutterStyle := tcell.StyleDefault.Foreground(ui.ColorGutterText).Background(ui.ColorGutterBg)
+
+			// Check for breakpoint marker on this line
+			if e.hasBreakpoint != nil && tab.FilePath != "" && e.hasBreakpoint(tab.FilePath, lineIdx+1) {
+				screen.SetContent(x, y+row, '*', nil,
+					tcell.StyleDefault.Foreground(tcell.ColorRed).Background(ui.ColorGutterBg).Bold(true))
+				for i, ch := range gutterStr {
+					if i > 0 && x+i < x+gutterW {
+						screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
+					}
+				}
+				goto gutterDone
 			}
+
+			// Check for diagnostic marker on this line
+			if tab.FilePath != "" {
+				if diags, ok := e.diagnostics[tab.FilePath]; ok {
+					if diag, ok := diags[lineIdx]; ok {
+						markerCh := '!'
+						markerFg := tcell.ColorYellow
+						if diag.Severity == 1 { // error
+							markerCh = 'E'
+							markerFg = tcell.ColorRed
+						} else if diag.Severity == 2 { // warning
+							markerCh = 'W'
+							markerFg = tcell.ColorYellow
+						}
+						// Draw marker in first gutter column
+						screen.SetContent(x, y+row, markerCh, nil,
+							tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg).Bold(true))
+						// Draw rest of gutter (line number) starting at position 1
+						for i, ch := range gutterStr {
+							if i > 0 && x+i < x+gutterW {
+								screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
+							}
+						}
+						goto gutterDone
+					}
+				}
+			}
+
+			for i, ch := range gutterStr {
+				if x+i < x+gutterW {
+					screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
+				}
+			}
+		gutterDone:
 		}
 
 		// Draw line content with syntax highlighting
@@ -869,6 +1097,11 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		if cursorScreenY >= y && cursorScreenY < y+height && cursorScreenX >= x+gutterW && cursorScreenX < x+width {
 			screen.ShowCursor(cursorScreenX, cursorScreenY)
 		}
+	}
+
+	// Draw completion popup on top
+	if e.completion.Visible() {
+		e.completion.Draw(screen, x, y, gutterW, tab.ScrollRow, tab.ScrollCol)
 	}
 }
 
@@ -1012,9 +1245,36 @@ func (e *Editor) drawWelcome(screen tcell.Screen, x, y, width, height int) {
 // InputHandler handles key events
 func (e *Editor) InputHandler() func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
 	return e.WrapInputHandler(func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
+		// Handle completion popup keys first
+		if e.completion.Visible() {
+			switch event.Key() {
+			case tcell.KeyDown:
+				e.completion.MoveDown()
+				return
+			case tcell.KeyUp:
+				e.completion.MoveUp()
+				return
+			case tcell.KeyEnter, tcell.KeyTab:
+				e.acceptCompletion()
+				return
+			case tcell.KeyEscape:
+				e.completion.Hide()
+				return
+			}
+		}
+
 		action := MapKey(event)
 		if action != ActionNone {
 			e.HandleAction(action, event.Rune())
+		}
+
+		// After inserting a character, check for completion triggers
+		if action == ActionInsertChar {
+			e.maybeRequestCompletion(event.Rune())
+		}
+		// If typing while popup visible, update the filter
+		if e.completion.Visible() && action == ActionInsertChar {
+			e.updateCompletionPrefix()
 		}
 	})
 }
@@ -1044,7 +1304,10 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 			return false, nil
 		}
 
-		gutterW := GutterWidth(tab.Buffer.LineCount())
+		gutterW := 0
+		if e.showLineNumbers {
+			gutterW = GutterWidth(tab.Buffer.LineCount())
+		}
 		editorX := mx - bx - gutterW
 		editorY := my - by - 1 // -1 for tab bar
 
