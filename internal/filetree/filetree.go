@@ -27,9 +27,10 @@ func New(rootPath string) *FileTree {
 
 	ft.SetBackgroundColor(ui.ColorBg)
 	ft.SetGraphicsColor(ui.ColorBorder)
-	ft.SetBorder(false)
+	ft.SetBorder(true)
+	ft.SetBorderColor(ui.ColorBorder)
 	ft.SetTitle(" Files ")
-	ft.SetTitleColor(ui.ColorTextWhite)
+	ft.SetTitleColor(ui.ColorPanelBlurred)
 
 	root := ft.createNode(rootPath, filepath.Base(rootPath), true)
 	ft.SetRoot(root)

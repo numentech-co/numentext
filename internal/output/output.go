@@ -27,9 +27,9 @@ func New() *Panel {
 	p.SetTextColor(ui.ColorTextWhite)
 	p.SetDynamicColors(true)
 	p.SetScrollable(true)
-	p.SetBorder(false)
+	p.SetBorder(true)
 	p.SetTitle(" Output ")
-	p.SetTitleColor(ui.ColorTextWhite)
+	p.SetTitleColor(ui.ColorPanelBlurred)
 	p.SetBorderColor(ui.ColorBorder)
 
 	return p

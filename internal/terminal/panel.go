@@ -10,9 +10,13 @@ import (
 // Panel is a tview-compatible widget that renders a VT terminal
 type Panel struct {
 	*tview.Box
-	term       *Terminal
-	hasFocus   bool
-	scrollOff  int // lines scrolled back into scrollback (0 = live)
+	term      *Terminal
+	hasFocus  bool
+	scrollOff int // lines scrolled back into scrollback (0 = live)
+
+	// Multi-session tab bar
+	tabNames  []string
+	activeTab int
 }
 
 // NewPanel creates a new terminal panel widget
@@ -21,6 +25,10 @@ func NewPanel() *Panel {
 		Box: tview.NewBox(),
 	}
 	p.SetBackgroundColor(ui.ColorOutputBg)
+	p.SetBorder(true)
+	p.SetBorderColor(ui.ColorBorder)
+	p.SetTitle(" Terminal ")
+	p.SetTitleColor(ui.ColorPanelBlurred)
 	return p
 }
 
@@ -34,10 +42,58 @@ func (p *Panel) Terminal() *Terminal {
 	return p.term
 }
 
+// SetTabs updates the tab bar labels and which tab is active.
+// Pass nil or empty slice to hide the tab bar.
+func (p *Panel) SetTabs(names []string, active int) {
+	p.tabNames = names
+	p.activeTab = active
+}
+
+// drawTabBar renders a tab bar on the top row of the inner rect.
+// Returns the number of rows consumed (0 or 1).
+func (p *Panel) drawTabBar(screen tcell.Screen, x, y, width int) int {
+	if len(p.tabNames) <= 1 {
+		return 0
+	}
+	// Fill background
+	bgStyle := tcell.StyleDefault.Background(ui.ColorDialogBg).Foreground(ui.ColorStatusText)
+	for col := 0; col < width; col++ {
+		screen.SetContent(x+col, y, ' ', nil, bgStyle)
+	}
+	col := 0
+	for i, name := range p.tabNames {
+		label := " " + name + " "
+		var tabStyle tcell.Style
+		if i == p.activeTab {
+			tabStyle = tcell.StyleDefault.Background(ui.ColorPanelFocused).Foreground(tcell.ColorBlack).Bold(true)
+		} else {
+			tabStyle = tcell.StyleDefault.Background(ui.ColorDialogBg).Foreground(ui.ColorStatusText)
+		}
+		for _, ch := range label {
+			if col >= width {
+				break
+			}
+			screen.SetContent(x+col, y, ch, nil, tabStyle)
+			col++
+		}
+		// Separator between tabs
+		if i < len(p.tabNames)-1 && col < width {
+			screen.SetContent(x+col, y, '|', nil, bgStyle)
+			col++
+		}
+	}
+	return 1
+}
+
 // Draw renders the VT grid to the screen
 func (p *Panel) Draw(screen tcell.Screen) {
 	p.Box.DrawForSubclass(screen, p)
 	x, y, width, height := p.GetInnerRect()
+
+	// Draw tab bar (consumes top row if multiple sessions)
+	tabRows := p.drawTabBar(screen, x, y, width)
+	y += tabRows
+	height -= tabRows
 
 	if p.term == nil {
 		// Draw empty panel with message

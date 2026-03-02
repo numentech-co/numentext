@@ -48,8 +48,15 @@ var (
 	ColorMenuHlText    = tcell.NewRGBColor(255, 255, 255)
 	ColorMenuShortcut  = tcell.NewRGBColor(85, 85, 85)
 
+	// Accelerator highlight
+	ColorAccel = tcell.NewRGBColor(255, 85, 85) // Red/bright for accelerator letters
+
 	// Border
 	ColorBorder = tcell.NewRGBColor(0, 170, 170)
+
+	// Panel focus indicator
+	ColorPanelFocused = tcell.NewRGBColor(255, 255, 85)  // Yellow - active panel border/title
+	ColorPanelBlurred = tcell.NewRGBColor(85, 85, 85)    // Dark gray - inactive panel title
 )
 
 // ThemeStyle returns a tcell.Style for the given role

@@ -10,16 +10,17 @@ import (
 // StatusBar displays file info, cursor position, and shortcut hints
 type StatusBar struct {
 	*tview.Box
-	filename    string
-	line        int
-	col         int
-	language    string
-	encoding    string
-	modified    bool
-	message     string
-	modeLabel   string
-	modePending string
-	commandText string
+	filename     string
+	line         int
+	col          int
+	language     string
+	encoding     string
+	modified     bool
+	message      string
+	modeLabel    string
+	modePending  string
+	commandText  string
+	focusedPanel string // name of currently focused panel
 }
 
 func NewStatusBar() *StatusBar {
@@ -52,6 +53,11 @@ func (sb *StatusBar) SetModeInfo(label, pending string) {
 
 func (sb *StatusBar) SetCommandText(text string) {
 	sb.commandText = text
+}
+
+// SetFocusedPanel updates the panel name shown in the status bar (e.g. "Editor", "File Tree").
+func (sb *StatusBar) SetFocusedPanel(name string) {
+	sb.focusedPanel = name
 }
 
 func (sb *StatusBar) Draw(screen tcell.Screen) {
@@ -106,8 +112,11 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 		}
 	}
 
-	// Right side: shortcut hints
+	// Right side: panel indicator + shortcut hints
 	right := "F5:Run  F9:Build  F10:Menu "
+	if sb.focusedPanel != "" {
+		right = "[" + sb.focusedPanel + "]  " + right
+	}
 	rightStart := x + width - len(right)
 	for i, ch := range right {
 		if rightStart+i >= x && rightStart+i < x+width {
