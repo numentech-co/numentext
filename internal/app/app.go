@@ -37,9 +37,13 @@ type App struct {
 
 	// Terminal
 	termPanel    *terminal.Panel
-	term         *terminal.Terminal
+	terms        []*terminal.Terminal
+	activeTermIdx int
 	termVisible  bool
 	bottomFlex   *tview.Flex
+
+	// Panel focus tracking
+	focusedPanel string // "filetree", "editor", "output", "terminal"
 
 	// LSP
 	lspManager *lsp.Manager
@@ -104,7 +108,7 @@ func (a *App) setupUI() {
 		if err != nil {
 			a.output.AppendError("Error opening file: " + err.Error())
 		}
-		a.tviewApp.SetFocus(a.editor)
+		a.focusPanel("editor")
 	})
 
 	a.menuBar.SetOnAction(func() {
@@ -130,6 +134,11 @@ func (a *App) setupUI() {
 	a.tviewApp.SetRoot(a.layout.Pages, true)
 	a.tviewApp.SetFocus(a.editor)
 	a.tviewApp.EnableMouse(true)
+
+	// Init panel focus tracking — editor is focused by default
+	a.focusedPanel = "editor"
+	a.statusBar.SetFocusedPanel("Editor")
+	a.updatePanelBorders()
 
 	// Init keyboard mode from config
 	a.setKeyboardMode(a.config.KeyboardMode)
@@ -167,6 +176,7 @@ func (a *App) setupMenus() {
 		Items: []*ui.MenuItem{
 			{Label: "Find...", Shortcut: "Ctrl+F", Action: a.showFind},
 			{Label: "Replace...", Shortcut: "Ctrl+H", Action: a.showReplace},
+			{Label: "Search in Files...", Shortcut: "Ctrl+Shift+F", Accel: 'i', Action: a.showSearchPalette},
 			{Label: "Go to Line...", Shortcut: "Ctrl+G", Accel: 'l', Action: a.showGoToLine},
 			{Label: "Go to Definition", Shortcut: "F12", Accel: 'd', Action: a.goToDefinition},
 			{Label: "Hover Info", Shortcut: "F11", Action: a.showHover},
@@ -244,7 +254,9 @@ func (a *App) setupMenus() {
 		Accel: 'w',
 		Items: []*ui.MenuItem{
 			{Label: "Next Tab", Shortcut: "Ctrl+Tab", Action: a.nextTab},
+			{Label: "Prev Tab", Shortcut: "Ctrl+Shift+Tab", Action: a.prevTab},
 			{Label: "Close Tab", Shortcut: "Ctrl+W", Action: a.closeTab},
+			{Label: "New Terminal Session", Shortcut: "Ctrl+Shift+T", Action: a.createTerminal},
 		},
 	}
 
@@ -361,20 +373,15 @@ func (a *App) setupKeybindings() {
 		case tcell.KeyEscape:
 			if a.menuBar.IsOpen() {
 				a.menuBar.Close()
-				a.tviewApp.SetFocus(a.editor)
+				a.focusPanel("editor")
 				return nil
 			}
 			if hasDialog {
 				// Let the dialog handle Escape
 				return event
 			}
-			// If terminal has focus, return to editor
-			if a.termPanel.HasFocus() {
-				a.tviewApp.SetFocus(a.editor)
-				return nil
-			}
-			// Return focus to editor from file tree/output
-			a.tviewApp.SetFocus(a.editor)
+			// Return focus to editor from file tree/output/terminal
+			a.focusPanel("editor")
 			return nil
 		case tcell.KeyF6:
 			a.debugContinue()
@@ -438,14 +445,27 @@ func (a *App) setupKeybindings() {
 						a.showFilePalette()
 					}
 					return nil
+				case 't':
+					if mod&tcell.ModShift != 0 && a.focusedPanel == "terminal" {
+						a.createTerminal()
+						return nil
+					}
 				case 'w':
-					a.closeTab()
+					if a.focusedPanel == "terminal" {
+						a.closeActiveTerminal()
+					} else {
+						a.closeTab()
+					}
 					return nil
 				case 'q':
 					a.quit()
 					return nil
 				case 'f':
-					a.showFind()
+					if mod&tcell.ModShift != 0 {
+						a.showSearchPalette()
+					} else {
+						a.showFind()
+					}
 					return nil
 				case 'h':
 					a.showReplace()
@@ -464,9 +484,25 @@ func (a *App) setupKeybindings() {
 					return event // Let editor handle it
 				}
 			}
+		case tcell.KeyCtrlRightSq:
+			// Ctrl+] — cycle focus to the next visible panel (wraps around)
+			a.nextPanel()
+			return nil
 		case tcell.KeyTab:
 			if ctrl {
-				a.nextTab()
+				if mod&tcell.ModShift != 0 {
+					if a.focusedPanel == "terminal" {
+						a.prevTerminal()
+					} else {
+						a.prevTab()
+					}
+				} else {
+					if a.focusedPanel == "terminal" {
+						a.nextTerminal()
+					} else {
+						a.nextTab()
+					}
+				}
 				return nil
 			}
 		}
@@ -485,6 +521,91 @@ func (a *App) setupKeybindings() {
 
 		return event
 	})
+}
+
+// visiblePanels returns the ordered list of currently visible panel names.
+func (a *App) visiblePanels() []string {
+	panels := []string{"filetree", "editor"}
+	if a.layout.OutputVisible() {
+		if a.termVisible {
+			panels = append(panels, "terminal")
+		} else {
+			panels = append(panels, "output")
+		}
+	}
+	return panels
+}
+
+// panelDisplayName returns a human-readable name for the status bar.
+func panelDisplayName(name string) string {
+	switch name {
+	case "filetree":
+		return "File Tree"
+	case "editor":
+		return "Editor"
+	case "output":
+		return "Output"
+	case "terminal":
+		return "Terminal"
+	}
+	return name
+}
+
+// focusPanel sets focus to the named panel, updates the border visuals and status bar.
+func (a *App) focusPanel(name string) {
+	a.focusedPanel = name
+	switch name {
+	case "filetree":
+		a.tviewApp.SetFocus(a.fileTree)
+	case "editor":
+		a.tviewApp.SetFocus(a.editor)
+	case "output":
+		a.tviewApp.SetFocus(a.output)
+	case "terminal":
+		a.tviewApp.SetFocus(a.termPanel)
+	}
+	a.updatePanelBorders()
+	a.statusBar.SetFocusedPanel(panelDisplayName(name))
+}
+
+// updatePanelBorders adjusts title colors to highlight the focused panel.
+// The editor uses its own tab bar as a focus indicator; no border title is needed for it.
+func (a *App) updatePanelBorders() {
+	if a.focusedPanel == "filetree" {
+		a.fileTree.SetTitleColor(ui.ColorPanelFocused)
+	} else {
+		a.fileTree.SetTitleColor(ui.ColorPanelBlurred)
+	}
+
+	if a.focusedPanel == "output" {
+		a.output.SetTitleColor(ui.ColorPanelFocused)
+	} else {
+		a.output.SetTitleColor(ui.ColorPanelBlurred)
+	}
+
+	if a.focusedPanel == "terminal" {
+		a.termPanel.SetTitleColor(ui.ColorPanelFocused)
+	} else {
+		a.termPanel.SetTitleColor(ui.ColorPanelBlurred)
+	}
+}
+
+// nextPanel cycles focus forward through visible panels.
+func (a *App) nextPanel() {
+	panels := a.visiblePanels()
+	if len(panels) == 0 {
+		return
+	}
+	current := a.focusedPanel
+	idx := 0
+	for i, p := range panels {
+		if p == current {
+			idx = i
+			break
+		}
+	}
+	next := panels[(idx+1)%len(panels)]
+	a.focusPanel(next)
 }
 
 func (a *App) updateStatusBar() {
@@ -540,6 +661,27 @@ func (a *App) showFilePalette() {
 		a.tviewApp.SetFocus(a.editor)
 	})
 	a.layout.ShowDialog("filepalette", palette)
+	a.tviewApp.SetFocus(palette)
+}
+
+// showSearchPalette opens the project-wide text search overlay (Ctrl+Shift+F).
+func (a *App) showSearchPalette() {
+	palette := ui.NewSearchPalette(a.workDir, func(result ui.SearchResult) {
+		// onSelect: open the file and jump to the matching line
+		a.layout.HideDialog("searchpalette")
+		err := a.editor.OpenFile(result.FilePath)
+		if err != nil {
+			a.output.AppendError("Error opening file: " + err.Error())
+		} else {
+			a.editor.GoToLine(result.Line)
+		}
+		a.tviewApp.SetFocus(a.editor)
+	}, func() {
+		// onClose: dismiss without opening
+		a.layout.HideDialog("searchpalette")
+		a.tviewApp.SetFocus(a.editor)
+	})
+	a.layout.ShowDialog("searchpalette", palette)
 	a.tviewApp.SetFocus(palette)
 }
 
@@ -739,6 +881,15 @@ func (a *App) nextTab() {
 	a.editor.SetActiveTab(next)
 }
 
+func (a *App) prevTab() {
+	count := a.editor.TabCount()
+	if count <= 1 {
+		return
+	}
+	prev := (a.editor.ActiveTabIndex() - 1 + count) % count
+	a.editor.SetActiveTab(prev)
+}
+
 func (a *App) runFile() {
 	tab := a.editor.ActiveTab()
 	if tab == nil || tab.FilePath == "" {
@@ -867,9 +1018,13 @@ func (a *App) showShortcuts() {
  F10       Menu bar
 
  [white::b]Navigation[-::-]
- Ctrl+Tab       Next tab
- Ctrl+1-9       Switch tab
- Ctrl+Arrows    Word jump
+ Ctrl+Tab            Next tab / Next terminal session
+ Ctrl+Shift+Tab      Prev tab / Prev terminal session
+ Ctrl+1-9            Switch tab
+ Ctrl+Arrows         Word jump
+ Ctrl+]              Next panel (File Tree -> Editor -> Output/Terminal)
+ Ctrl+Shift+T        New terminal session (when terminal focused)
+ Ctrl+W              Close tab / Close terminal session
 
  Press Escape to close
 `
@@ -1138,17 +1293,83 @@ func (a *App) toggleTerminal() {
 	}
 }
 
+// termName returns the display label for a terminal at the given index.
+func termName(idx int) string {
+	return fmt.Sprintf("Term %d", idx+1)
+}
+
+// updateTermPanel syncs the panel's terminal and tab bar to the current terms list.
+func (a *App) updateTermPanel() {
+	if len(a.terms) == 0 {
+		a.termPanel.SetTerminal(nil)
+		a.termPanel.SetTabs(nil, 0)
+		return
+	}
+	a.termPanel.SetTerminal(a.terms[a.activeTermIdx])
+	names := make([]string, len(a.terms))
+	for i := range a.terms {
+		names[i] = termName(i)
+	}
+	a.termPanel.SetTabs(names, a.activeTermIdx)
+}
+
+// createTerminal starts a new terminal session and makes it active.
+func (a *App) createTerminal() {
+	t := terminal.NewTerminal(80, 24)
+	t.SetOnData(func() {
+		a.tviewApp.QueueUpdateDraw(func() {})
+	})
+	err := t.Start("")
+	if err != nil {
+		a.output.AppendError("Failed to start terminal: " + err.Error())
+		return
+	}
+	a.terms = append(a.terms, t)
+	a.activeTermIdx = len(a.terms) - 1
+	a.updateTermPanel()
+}
+
+// closeActiveTerminal stops the active terminal and removes it from the list.
+func (a *App) closeActiveTerminal() {
+	if len(a.terms) == 0 {
+		return
+	}
+	a.terms[a.activeTermIdx].Stop()
+	a.terms = append(a.terms[:a.activeTermIdx], a.terms[a.activeTermIdx+1:]...)
+	if len(a.terms) == 0 {
+		// No sessions left — hide terminal panel
+		a.closeTerminal()
+		return
+	}
+	if a.activeTermIdx >= len(a.terms) {
+		a.activeTermIdx = len(a.terms) - 1
+	}
+	a.updateTermPanel()
+}
+
+// nextTerminal cycles to the next terminal session.
+func (a *App) nextTerminal() {
+	if len(a.terms) <= 1 {
+		return
+	}
+	a.activeTermIdx = (a.activeTermIdx + 1) % len(a.terms)
+	a.updateTermPanel()
+}
+
+// prevTerminal cycles to the previous terminal session.
+func (a *App) prevTerminal() {
+	if len(a.terms) <= 1 {
+		return
+	}
+	a.activeTermIdx = (a.activeTermIdx - 1 + len(a.terms)) % len(a.terms)
+	a.updateTermPanel()
+}
+
 func (a *App) openTerminal() {
-	if a.term == nil {
-		a.term = terminal.NewTerminal(80, 24)
-		a.termPanel.SetTerminal(a.term)
-		a.term.SetOnData(func() {
-			a.tviewApp.QueueUpdateDraw(func() {})
-		})
-		err := a.term.Start("")
-		if err != nil {
-			a.output.AppendError("Failed to start terminal: " + err.Error())
-			return
+	if len(a.terms) == 0 {
+		a.createTerminal()
+		if len(a.terms) == 0 {
+			return // creation failed
 		}
 	}
 
@@ -1156,7 +1377,7 @@ func (a *App) openTerminal() {
 	a.bottomFlex.AddItem(a.termPanel, 0, 1, true)
 	a.termVisible = true
 	a.layout.SetOutputVisible(true, 8)
-	a.tviewApp.SetFocus(a.termPanel)
+	a.focusPanel("terminal")
 }
 
 func (a *App) closeTerminal() {
@@ -1167,7 +1388,7 @@ func (a *App) closeTerminal() {
 	if len(a.output.Lines()) == 0 {
 		a.layout.SetOutputVisible(false, 0)
 	}
-	a.tviewApp.SetFocus(a.editor)
+	a.focusPanel("editor")
 }
 
 // macOptionRune maps macOS Option+letter Unicode characters back to their
@@ -1248,8 +1469,8 @@ func (a *App) Run() error {
 	defer a.lspManager.StopAll()
 	defer a.dapManager.StopSession()
 	defer func() {
-		if a.term != nil {
-			a.term.Stop()
+		for _, t := range a.terms {
+			t.Stop()
 		}
 	}()
 	return a.tviewApp.Run()

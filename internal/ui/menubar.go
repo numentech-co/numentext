@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"unicode"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -11,6 +13,7 @@ type MenuItem struct {
 	Shortcut string
 	Action   func()
 	Disabled bool
+	Accel    rune // accelerator letter (lowercase), 0 = auto from first char
 }
 
 // Menu represents a dropdown menu
@@ -18,6 +21,7 @@ type Menu struct {
 	Label  string
 	Items  []*MenuItem
 	OnOpen func() // Called before the dropdown opens, for dynamic menus
+	Accel  rune   // accelerator letter for Alt+letter access
 }
 
 // MenuBar is a horizontal menu bar with dropdown support
@@ -48,6 +52,11 @@ func (mb *MenuBar) AddMenu(menu *Menu) {
 	mb.menus = append(mb.menus, menu)
 }
 
+// Menus returns all registered menus. Used by the command palette to enumerate commands.
+func (mb *MenuBar) Menus() []*Menu {
+	return mb.menus
+}
+
 func (mb *MenuBar) IsOpen() bool {
 	return mb.dropdownOpen
 }
@@ -69,6 +78,49 @@ func (mb *MenuBar) Open(menuIdx int) {
 	}
 }
 
+// effectiveAccel returns the accelerator rune for a menu or item label.
+// If accel is non-zero, returns it; otherwise returns the lowercase of the first letter.
+func effectiveAccel(accel rune, label string) rune {
+	if accel != 0 {
+		return unicode.ToLower(accel)
+	}
+	for _, ch := range label {
+		if unicode.IsLetter(ch) {
+			return unicode.ToLower(ch)
+		}
+	}
+	return 0
+}
+
+// MenuForAccel returns the index of the menu matching the given accelerator rune, or -1.
+func (mb *MenuBar) MenuForAccel(r rune) int {
+	r = unicode.ToLower(r)
+	for i, m := range mb.menus {
+		if effectiveAccel(m.Accel, m.Label) == r {
+			return i
+		}
+	}
+	return -1
+}
+
+// itemForAccel returns the index of the item in the active menu matching the given rune, or -1.
+func (mb *MenuBar) itemForAccel(r rune) int {
+	if mb.activeMenu < 0 || mb.activeMenu >= len(mb.menus) {
+		return -1
+	}
+	r = unicode.ToLower(r)
+	menu := mb.menus[mb.activeMenu]
+	for i, item := range menu.Items {
+		if item.Disabled {
+			continue
+		}
+		if effectiveAccel(item.Accel, item.Label) == r {
+			return i
+		}
+	}
+	return -1
+}
+
 func (mb *MenuBar) Draw(screen tcell.Screen) {
 	mb.Box.DrawForSubclass(screen, mb)
 	x, y, width, _ := mb.GetInnerRect()
@@ -86,9 +138,20 @@ func (mb *MenuBar) Draw(screen tcell.Screen) {
 		if i == mb.activeMenu {
 			style = tcell.StyleDefault.Foreground(ColorMenuHlText).Background(ColorMenuHighlight)
 		}
+		accelRune := effectiveAccel(menu.Accel, menu.Label)
+		accelDone := false
 		for _, ch := range label {
 			if cx < x+width {
-				screen.SetContent(cx, y, ch, nil, style)
+				charStyle := style
+				if !accelDone && unicode.ToLower(ch) == accelRune && unicode.IsLetter(ch) {
+					bg := ColorMenuBg
+					if i == mb.activeMenu {
+						bg = ColorMenuHighlight
+					}
+					charStyle = tcell.StyleDefault.Foreground(ColorAccel).Background(bg).Bold(true)
+					accelDone = true
+				}
+				screen.SetContent(cx, y, ch, nil, charStyle)
 				cx++
 			}
 		}
@@ -142,10 +205,21 @@ func (mb *MenuBar) drawDropdown(screen tcell.Screen, startX, startY int) {
 			screen.SetContent(cx, iy, ' ', nil, style)
 		}
 
-		// Draw label
+		// Draw label with accelerator highlight
+		accelRune := effectiveAccel(item.Accel, item.Label)
+		accelDone := false
 		for j, ch := range item.Label {
 			if dropX+2+j < dropX+maxWidth {
-				screen.SetContent(dropX+2+j, iy, ch, nil, style)
+				charStyle := style
+				if !accelDone && !item.Disabled && unicode.ToLower(ch) == accelRune && unicode.IsLetter(ch) {
+					bg := ColorMenuDropBg
+					if i == mb.activeItem {
+						bg = ColorMenuHighlight
+					}
+					charStyle = tcell.StyleDefault.Foreground(ColorAccel).Background(bg).Bold(true)
+					accelDone = true
+				}
+				screen.SetContent(dropX+2+j, iy, ch, nil, charStyle)
 			}
 		}
 
@@ -211,6 +285,28 @@ func (mb *MenuBar) InputHandler() func(event *tcell.EventKey, setFocus func(p tv
 			mb.Close()
 			if mb.onAction != nil {
 				mb.onAction()
+			}
+		case tcell.KeyRune:
+			r := event.Rune()
+			if event.Modifiers()&tcell.ModAlt != 0 {
+				// Alt+letter: switch to another menu
+				idx := mb.MenuForAccel(r)
+				if idx >= 0 {
+					mb.Open(idx)
+				}
+			} else {
+				// Plain letter: execute matching item in current dropdown
+				idx := mb.itemForAccel(r)
+				if idx >= 0 {
+					item := menu.Items[idx]
+					if item.Action != nil {
+						mb.Close()
+						if mb.onAction != nil {
+							mb.onAction()
+						}
+						item.Action()
+					}
+				}
 			}
 		}
 	})
