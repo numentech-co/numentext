@@ -176,7 +176,8 @@ func (p *Panel) Draw(screen tcell.Screen) {
 	p.term.Lock()
 	vt = p.term.VT()
 	bt := vt.Blocks()
-	useBoxed := p.boxMode && bt.BlockCount() > 0 && !bt.AltScreen()
+	// Use boxed rendering only in live view (not scrolled back)
+	useBoxed := p.boxMode && bt.BlockCount() > 0 && !bt.AltScreen() && p.scrollOff == 0
 
 	if useBoxed {
 		p.drawBoxed(screen, x, y, width, height, vt, bt)
@@ -568,8 +569,8 @@ func (p *Panel) InputHandler() func(event *tcell.EventKey, setFocus func(tview.P
 			p.selectedBlock = -1
 		}
 
-		// Shift+PgUp/PgDn for scrollback (only in raw mode)
-		if shift && !p.boxMode {
+		// Shift+PgUp/PgDn for scrollback
+		if shift {
 			_, _, _, h := p.GetInnerRect()
 			switch key {
 			case tcell.KeyPgUp:
@@ -744,34 +745,22 @@ func (p *Panel) MouseHandler() func(action tview.MouseAction, event *tcell.Event
 
 		switch action {
 		case tview.MouseScrollUp:
-			if p.boxMode {
-				p.selectPrevBlock()
-			} else {
-				p.scrollOff += 3
-				p.term.Lock()
-				maxScroll := len(p.term.VT().Scrollback())
-				p.term.Unlock()
-				if p.scrollOff > maxScroll {
-					p.scrollOff = maxScroll
-				}
+			p.scrollOff += 3
+			p.term.Lock()
+			maxScroll := len(p.term.VT().Scrollback())
+			p.term.Unlock()
+			if p.scrollOff > maxScroll {
+				p.scrollOff = maxScroll
 			}
 			return true, nil
 		case tview.MouseScrollDown:
-			if p.boxMode {
-				p.selectNextBlock()
-			} else {
-				p.scrollOff -= 3
-				if p.scrollOff < 0 {
-					p.scrollOff = 0
-				}
+			p.scrollOff -= 3
+			if p.scrollOff < 0 {
+				p.scrollOff = 0
 			}
 			return true, nil
 		case tview.MouseLeftClick:
 			setFocus(p)
-			// In box mode, clicking a block header toggles it
-			if p.boxMode && p.selectedBlock >= 0 {
-				p.toggleSelectedBlock()
-			}
 			return true, nil
 		}
 
