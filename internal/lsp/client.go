@@ -254,7 +254,7 @@ func (c *Client) Stop() {
 
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(500 * time.Millisecond):
 	}
 
 	c.mu.Lock()

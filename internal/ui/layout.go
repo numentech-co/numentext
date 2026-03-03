@@ -17,22 +17,24 @@ type Layout struct {
 
 	Pages *tview.Pages
 
-	outputHeight int
+	fileTreeWidth int
+	outputHeight  int
 }
 
 // NewLayout creates the main application layout
 func NewLayout(menuBar *MenuBar, fileTree tview.Primitive, editor tview.Primitive, output tview.Primitive, statusBar *StatusBar) *Layout {
 	l := &Layout{
-		MenuBar:   menuBar,
-		FileTree:  fileTree,
-		Editor:    editor,
-		Output:    output,
-		StatusBar: statusBar,
+		MenuBar:       menuBar,
+		FileTree:      fileTree,
+		Editor:        editor,
+		Output:        output,
+		StatusBar:     statusBar,
+		fileTreeWidth: 20,
 	}
 
 	// Middle section: file tree + editor
 	middle := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(fileTree, 20, 0, false).
+		AddItem(fileTree, l.fileTreeWidth, 0, false).
 		AddItem(editor, 0, 1, true)
 
 	// Main vertical layout: menu, middle, output, status
@@ -93,11 +95,53 @@ func (l *Layout) OutputVisible() bool {
 	return l.outputHeight > 0
 }
 
+// OutputHeight returns the current output panel height
+func (l *Layout) OutputHeight() int {
+	return l.outputHeight
+}
+
+// SetOutputHeight sets the output panel height (clamped to [4, maxHeight]).
+// maxHeight should be half the screen height, passed in by the caller.
+// Only rebuilds if the output panel is currently visible.
+func (l *Layout) SetOutputHeight(h int, maxHeight int) {
+	if h < 4 {
+		h = 4
+	}
+	if h > maxHeight {
+		h = maxHeight
+	}
+	if l.outputHeight == h || l.outputHeight == 0 {
+		return
+	}
+	l.outputHeight = h
+	l.rebuildMainFlex()
+}
+
+// FileTreeWidth returns the current file tree width
+func (l *Layout) FileTreeWidth() int {
+	return l.fileTreeWidth
+}
+
+// SetFileTreeWidth sets the file tree width (clamped to [10, 60]) and rebuilds the layout
+func (l *Layout) SetFileTreeWidth(w int) {
+	if w < 10 {
+		w = 10
+	}
+	if w > 60 {
+		w = 60
+	}
+	if l.fileTreeWidth == w {
+		return
+	}
+	l.fileTreeWidth = w
+	l.rebuildMainFlex()
+}
+
 func (l *Layout) rebuildMainFlex() {
 	l.MainGrid.Clear()
 
 	middle := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(l.FileTree, 20, 0, false).
+		AddItem(l.FileTree, l.fileTreeWidth, 0, false).
 		AddItem(l.Editor, 0, 1, true)
 
 	l.MainGrid.AddItem(l.MenuBar, 1, 0, false)

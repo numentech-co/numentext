@@ -13,16 +13,20 @@ type Config struct {
 	ShowLineNum  bool     `json:"show_line_numbers"`
 	WordWrap     bool     `json:"word_wrap"`
 	KeyboardMode string   `json:"keyboard_mode"`
+	FileTreeWidth int     `json:"file_tree_width"`
+	OutputHeight  int     `json:"output_height"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		RecentFiles:  []string{},
-		TabSize:      4,
-		Theme:        "borland",
-		ShowLineNum:  true,
-		WordWrap:     false,
-		KeyboardMode: "default",
+		RecentFiles:   []string{},
+		TabSize:       4,
+		Theme:         "borland",
+		ShowLineNum:   true,
+		WordWrap:      false,
+		KeyboardMode:  "default",
+		FileTreeWidth: 20,
+		OutputHeight:  8,
 	}
 }
 
@@ -42,6 +46,12 @@ func Load() *Config {
 		return cfg
 	}
 	json.Unmarshal(data, cfg)
+	if cfg.FileTreeWidth == 0 {
+		cfg.FileTreeWidth = 20
+	}
+	if cfg.OutputHeight == 0 {
+		cfg.OutputHeight = 8
+	}
 	return cfg
 }
 

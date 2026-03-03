@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -50,6 +51,13 @@ type App struct {
 
 	// DAP
 	dapManager *dap.Manager
+
+	// Mouse drag state for panel resizing
+	dragging    string // "", "vertical", "horizontal"
+	dragStartX  int
+	dragStartY  int
+	dragStartW  int // file tree width at drag start
+	dragStartH  int // output height at drag start
 }
 
 func New() *App {
@@ -64,6 +72,7 @@ func New() *App {
 	a.setupUI()
 	a.setupMenus()
 	a.setupKeybindings()
+	a.setupMouse()
 	a.setupLSP()
 	a.setupDAP()
 
@@ -121,7 +130,7 @@ func (a *App) setupUI() {
 	// Auto-show/hide output panel based on content
 	a.output.SetOnChange(func(hasContent bool) {
 		if hasContent {
-			a.layout.SetOutputVisible(true, 8)
+			a.layout.SetOutputVisible(true, a.config.OutputHeight)
 		} else if !a.termVisible {
 			a.layout.SetOutputVisible(false, 0)
 		}
@@ -133,6 +142,11 @@ func (a *App) setupUI() {
 
 	// Create layout
 	a.layout = ui.NewLayout(a.menuBar, a.fileTree, a.editor, a.bottomFlex, a.statusBar)
+
+	// Apply persisted panel sizes from config
+	if a.config.FileTreeWidth > 0 {
+		a.layout.SetFileTreeWidth(a.config.FileTreeWidth)
+	}
 
 	a.tviewApp.SetRoot(a.layout.Pages, true)
 	a.tviewApp.SetFocus(a.editor)
@@ -373,6 +387,37 @@ func (a *App) setupKeybindings() {
 			return event
 		}
 
+		// Ctrl+Shift+Arrow: resize panels
+		shift := mod&tcell.ModShift != 0
+		if ctrl && shift {
+			switch key {
+			case tcell.KeyLeft:
+				a.layout.SetFileTreeWidth(a.layout.FileTreeWidth() - 2)
+				a.config.FileTreeWidth = a.layout.FileTreeWidth()
+				a.config.Save()
+				return nil
+			case tcell.KeyRight:
+				a.layout.SetFileTreeWidth(a.layout.FileTreeWidth() + 2)
+				a.config.FileTreeWidth = a.layout.FileTreeWidth()
+				a.config.Save()
+				return nil
+			case tcell.KeyUp:
+				_, _, _, screenH := a.layout.MainGrid.GetRect()
+				maxH := screenH / 2
+				a.layout.SetOutputHeight(a.layout.OutputHeight()+2, maxH)
+				a.config.OutputHeight = a.layout.OutputHeight()
+				a.config.Save()
+				return nil
+			case tcell.KeyDown:
+				_, _, _, screenH := a.layout.MainGrid.GetRect()
+				maxH := screenH / 2
+				a.layout.SetOutputHeight(a.layout.OutputHeight()-2, maxH)
+				a.config.OutputHeight = a.layout.OutputHeight()
+				a.config.Save()
+				return nil
+			}
+		}
+
 		switch key {
 		case tcell.KeyEscape:
 			if a.menuBar.IsOpen() {
@@ -524,6 +569,72 @@ func (a *App) setupKeybindings() {
 		}
 
 		return event
+	})
+}
+
+func (a *App) setupMouse() {
+	a.tviewApp.SetMouseCapture(func(event *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
+		x, y := event.Position()
+
+		switch action {
+		case tview.MouseLeftDown:
+			// Determine layout geometry from MainGrid's rect
+			gx, gy, _, gh := a.layout.MainGrid.GetRect()
+
+			// Vertical splitter: the column at fileTreeWidth (relative to grid)
+			splitCol := gx + a.layout.FileTreeWidth()
+			// The vertical splitter spans from row 1 (below menu) to bottom panel boundary
+			topRow := gy + 1 // below menu bar
+			bottomRow := gy + gh - 1 // above status bar
+			if a.layout.OutputVisible() {
+				bottomRow -= a.layout.OutputHeight()
+			}
+
+			if x >= splitCol-1 && x <= splitCol+1 && y >= topRow && y < bottomRow {
+				a.dragging = "vertical"
+				a.dragStartX = x
+				a.dragStartW = a.layout.FileTreeWidth()
+				return nil, tview.MouseConsumed
+			}
+
+			// Horizontal splitter: the row where the bottom panel starts
+			if a.layout.OutputVisible() {
+				splitRow := gy + gh - 1 - a.layout.OutputHeight() // 1 for status bar
+				if y >= splitRow-1 && y <= splitRow+1 && x >= gx {
+					a.dragging = "horizontal"
+					a.dragStartY = y
+					a.dragStartH = a.layout.OutputHeight()
+					return nil, tview.MouseConsumed
+				}
+			}
+
+		case tview.MouseMove:
+			if a.dragging == "vertical" {
+				delta := x - a.dragStartX
+				newW := a.dragStartW + delta
+				a.layout.SetFileTreeWidth(newW)
+				a.config.FileTreeWidth = a.layout.FileTreeWidth()
+				return nil, tview.MouseConsumed
+			}
+			if a.dragging == "horizontal" {
+				delta := a.dragStartY - y // dragging up = grow
+				_, _, _, screenH := a.layout.MainGrid.GetRect()
+				maxH := screenH / 2
+				newH := a.dragStartH + delta
+				a.layout.SetOutputHeight(newH, maxH)
+				a.config.OutputHeight = a.layout.OutputHeight()
+				return nil, tview.MouseConsumed
+			}
+
+		case tview.MouseLeftUp:
+			if a.dragging != "" {
+				a.dragging = ""
+				a.config.Save()
+				return nil, tview.MouseConsumed
+			}
+		}
+
+		return event, action
 	})
 }
 
@@ -1030,6 +1141,12 @@ func (a *App) showShortcuts() {
  Ctrl+Shift+T        New terminal session (when terminal focused)
  Ctrl+W              Close tab / Close terminal session
 
+ [white::b]Panel Resize[-::-]
+ Ctrl+Shift+Left     Shrink file tree
+ Ctrl+Shift+Right    Grow file tree
+ Ctrl+Shift+Up       Grow bottom panel
+ Ctrl+Shift+Down     Shrink bottom panel
+
  [white::b]Terminal Block Mode[-::-]
  Ctrl+Up/Down        Select prev/next command block
  Enter               Toggle expand/collapse (when block selected)
@@ -1400,7 +1517,7 @@ func (a *App) openTerminal() {
 	a.bottomFlex.Clear()
 	a.bottomFlex.AddItem(a.termPanel, 0, 1, true)
 	a.termVisible = true
-	a.layout.SetOutputVisible(true, 8)
+	a.layout.SetOutputVisible(true, a.config.OutputHeight)
 	a.focusPanel("terminal")
 }
 
@@ -1490,12 +1607,39 @@ func (a *App) cycleKeyboardMode() {
 
 // Run starts the application
 func (a *App) Run() error {
-	defer a.lspManager.StopAll()
-	defer a.dapManager.StopSession()
-	defer func() {
+	defer a.cleanup()
+	return a.tviewApp.Run()
+}
+
+// cleanup stops all subprocesses with an overall timeout so the app never hangs on exit.
+func (a *App) cleanup() {
+	done := make(chan struct{})
+	go func() {
 		for _, t := range a.terms {
 			t.Stop()
 		}
+		a.dapManager.StopSession()
+		a.lspManager.StopAll()
+		close(done)
 	}()
-	return a.tviewApp.Run()
+
+	frames := []string{"|", "/", "-", "\\"}
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	deadline := time.After(2 * time.Second)
+	i := 0
+
+	for {
+		select {
+		case <-done:
+			fmt.Print("\r\033[K") // clear spinner line
+			return
+		case <-deadline:
+			fmt.Print("\r\033[K")
+			return
+		case <-tick.C:
+			fmt.Printf("\r  %s Shutting down...", frames[i%len(frames)])
+			i++
+		}
+	}
 }

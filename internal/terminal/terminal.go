@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -20,6 +21,7 @@ type Terminal struct {
 	running   bool
 	onData    func() // callback when new data arrives
 	drawDirty atomic.Bool // debounce flag for redraws
+	waited    chan struct{} // closed when cmd.Wait() returns
 }
 
 // NewTerminal creates a terminal with the given dimensions
@@ -56,6 +58,7 @@ func (t *Terminal) Start(shell string) error {
 	t.cmd = cmd
 	t.ptmx = ptmx
 	t.running = true
+	t.waited = make(chan struct{})
 	t.mu.Unlock()
 
 	// Read PTY output in background
@@ -67,6 +70,7 @@ func (t *Terminal) Start(shell string) error {
 		t.mu.Lock()
 		t.running = false
 		t.mu.Unlock()
+		close(t.waited)
 	}()
 
 	return nil
@@ -158,19 +162,33 @@ func (t *Terminal) MarkClean() {
 	t.drawDirty.Store(false)
 }
 
-// Stop terminates the shell process
+// Stop terminates the shell process and waits for it to exit.
 func (t *Terminal) Stop() {
 	t.mu.Lock()
 	cmd := t.cmd
 	ptmx := t.ptmx
+	waited := t.waited
 	t.running = false
 	t.mu.Unlock()
 
-	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Signal(syscall.SIGTERM)
-	}
+	// Close PTY first — this unblocks readLoop and signals the shell
 	if ptmx != nil {
 		_ = ptmx.Close()
+	}
+
+	if cmd != nil && cmd.Process != nil {
+		// Send SIGTERM, then wait for the goroutine that already called cmd.Wait()
+		_ = cmd.Process.Signal(syscall.SIGTERM)
+
+		if waited != nil {
+			select {
+			case <-waited:
+			case <-time.After(2 * time.Second):
+				// Force kill if SIGTERM didn't work
+				_ = cmd.Process.Kill()
+				<-waited
+			}
+		}
 	}
 }
 
