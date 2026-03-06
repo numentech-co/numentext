@@ -3,6 +3,7 @@ package editor
 import (
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
@@ -121,10 +122,14 @@ func (h *Highlighter) Highlight(text string) []HighlightedLine {
 				colIdx = 0
 				continue
 			}
-			if lineIdx < len(result) && colIdx < len(result[lineIdx].Styles) {
-				result[lineIdx].Styles[colIdx] = CharStyle{Fg: fg, Bold: bold}
+			runeSize := utf8.RuneLen(ch)
+			// Fill styles for all bytes of this rune so hl.Styles[byteOffset] works
+			if lineIdx < len(result) {
+				for b := 0; b < runeSize && colIdx+b < len(result[lineIdx].Styles); b++ {
+					result[lineIdx].Styles[colIdx+b] = CharStyle{Fg: fg, Bold: bold}
+				}
 			}
-			colIdx++
+			colIdx += runeSize
 		}
 	}
 

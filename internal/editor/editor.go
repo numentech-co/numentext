@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -35,11 +36,12 @@ type Editor struct {
 	*tview.Box
 	tabs        []*Tab
 	activeTab   int
-	pageHeight  int
 	onChange    func()
 	onTabChange func()
 	hasFocus       bool
 	showLineNumbers bool
+	wordWrap        bool
+	tabSize         int
 	cachedHL       []HighlightedLine
 	cachedHLVer    int
 	hlVersion      int
@@ -82,6 +84,7 @@ func NewEditor() *Editor {
 		Box:             tview.NewBox(),
 		tabs:            []*Tab{},
 		showLineNumbers: true,
+		tabSize:         4,
 		completion:      NewCompletionPopup(),
 		diagnostics:     make(map[string]map[int]DiagnosticInfo),
 		keyMode:         keymode.NewDefaultMode(),
@@ -96,6 +99,148 @@ func (e *Editor) SetShowLineNumbers(show bool) {
 
 func (e *Editor) ShowLineNumbers() bool {
 	return e.showLineNumbers
+}
+
+func (e *Editor) SetWordWrap(on bool) {
+	e.wordWrap = on
+	e.hlVersion++ // force redraw
+}
+
+func (e *Editor) WordWrap() bool {
+	return e.wordWrap
+}
+
+// SetTabSize sets the tab display width
+func (e *Editor) SetTabSize(size int) {
+	if size < 1 {
+		size = 1
+	}
+	e.tabSize = size
+}
+
+// byteOffsetToScreenCol converts a byte offset in a line to its screen column,
+// accounting for multi-byte UTF-8 characters and tab expansion.
+func byteOffsetToScreenCol(line string, byteOff, tabSize int) int {
+	if tabSize < 1 {
+		tabSize = 4
+	}
+	col := 0
+	for i, ch := range line {
+		if i >= byteOff {
+			break
+		}
+		if ch == '\t' {
+			col += tabSize - (col % tabSize)
+		} else {
+			col++
+		}
+	}
+	return col
+}
+
+// screenColToByteOffset converts a screen column to the corresponding byte offset,
+// accounting for multi-byte UTF-8 characters and tab expansion.
+func screenColToByteOffset(line string, screenCol, tabSize int) int {
+	if tabSize < 1 {
+		tabSize = 4
+	}
+	col := 0
+	for i, ch := range line {
+		if col >= screenCol {
+			return i
+		}
+		if ch == '\t' {
+			col += tabSize - (col % tabSize)
+		} else {
+			col++
+		}
+	}
+	return len(line)
+}
+
+// wrapSegment represents one visual line within a wrapped logical line.
+type wrapSegment struct {
+	startCol int
+	endCol   int
+}
+
+// wrapLine splits a logical line into visual segments of at most maxWidth screen columns.
+// It accounts for multi-byte UTF-8 characters and tab expansion.
+// Returned startCol/endCol are byte offsets for compatibility with downstream code.
+func wrapLine(line string, maxWidth, tabSize int) []wrapSegment {
+	if maxWidth < 1 {
+		maxWidth = 1
+	}
+	if tabSize < 1 {
+		tabSize = 4
+	}
+	if len(line) == 0 {
+		return []wrapSegment{{0, 0}}
+	}
+
+	// Build a lookup of rune index -> byte offset and visual width info
+	type runeInfo struct {
+		byteOff  int
+		ch       rune
+		runeSize int
+	}
+	var runes []runeInfo
+	for i, ch := range line {
+		runes = append(runes, runeInfo{i, ch, utf8.RuneLen(ch)})
+	}
+
+	var segs []wrapSegment
+	startRune := 0
+	for startRune < len(runes) {
+		visualCol := 0
+		lastBreak := -1 // rune index of last break point (break after this rune)
+		endRune := startRune
+
+		for endRune < len(runes) {
+			ch := runes[endRune].ch
+			var charWidth int
+			if ch == '\t' {
+				charWidth = tabSize - (visualCol % tabSize)
+			} else {
+				charWidth = 1
+			}
+
+			if visualCol+charWidth > maxWidth && endRune > startRune {
+				break
+			}
+
+			visualCol += charWidth
+
+			if ch == ' ' || ch == '\t' || ch == '-' || ch == ',' || ch == ';' ||
+				ch == '.' || ch == ':' || ch == '/' || ch == '\\' || ch == ')' ||
+				ch == ']' || ch == '}' {
+				lastBreak = endRune
+			}
+
+			endRune++
+
+			if visualCol >= maxWidth {
+				break
+			}
+		}
+
+		if endRune >= len(runes) {
+			// Rest of line fits
+			segs = append(segs, wrapSegment{runes[startRune].byteOff, len(line)})
+			break
+		}
+
+		// Try to break at last break point
+		breakRune := endRune
+		if lastBreak >= startRune && lastBreak+1 < endRune {
+			breakRune = lastBreak + 1
+		}
+
+		endByteOff := runes[breakRune].byteOff
+		segs = append(segs, wrapSegment{runes[startRune].byteOff, endByteOff})
+		startRune = breakRune
+	}
+	return segs
 }
 
 func (e *Editor) SetOnChange(fn func()) {
@@ -127,6 +272,7 @@ func (e *Editor) Completion() *CompletionPopup {
 	return e.completion
 }
 
+// notifyChange signals that file content has changed (edits, not cursor moves).
 func (e *Editor) notifyChange() {
 	e.hlVersion++
 	if e.onChange != nil {
@@ -137,6 +283,13 @@ func (e *Editor) notifyChange() {
 		if tab != nil && tab.FilePath != "" {
 			e.onFileChange(tab.FilePath, tab.Buffer.Text())
 		}
+	}
+}
+
+// notifyCursorMove signals that only the cursor position changed (no content change).
+func (e *Editor) notifyCursorMove() {
+	if e.onChange != nil {
+		e.onChange()
 	}
 }
 
@@ -441,14 +594,94 @@ func (e *Editor) TabCount() int {
 
 // Cursor and editing
 func (e *Editor) ensureCursorVisible(tab *Tab) {
-	_, _, _, height := e.GetInnerRect()
+	_, _, width, height := e.GetInnerRect()
 	height -= 1 // tab bar
+
+	if e.wordWrap {
+		tab.ScrollCol = 0
+		e.ensureCursorVisibleWrapped(tab, width, height)
+		return
+	}
 
 	if tab.CursorRow < tab.ScrollRow {
 		tab.ScrollRow = tab.CursorRow
 	}
 	if tab.CursorRow >= tab.ScrollRow+height {
 		tab.ScrollRow = tab.CursorRow - height + 1
+	}
+
+	// Horizontal scrolling
+	gutterW := 0
+	if e.showLineNumbers {
+		gutterW = GutterWidth(tab.Buffer.LineCount())
+	}
+	visibleWidth := width - gutterW
+	if visibleWidth < 1 {
+		visibleWidth = 1
+	}
+	const margin = 4
+	if tab.CursorCol < tab.ScrollCol {
+		tab.ScrollCol = tab.CursorCol - margin
+		if tab.ScrollCol < 0 {
+			tab.ScrollCol = 0
+		}
+	}
+	if tab.CursorCol >= tab.ScrollCol+visibleWidth {
+		tab.ScrollCol = tab.CursorCol - visibleWidth + 1 + margin
+	}
+}
+
+// ensureCursorVisibleWrapped adjusts ScrollRow so the cursor is visible in word wrap mode.
+func (e *Editor) ensureCursorVisibleWrapped(tab *Tab, width, height int) {
+	gutterW := 0
+	if e.showLineNumbers {
+		gutterW = GutterWidth(tab.Buffer.LineCount())
+	}
+	editorWidth := width - gutterW
+	if editorWidth < 1 {
+		editorWidth = 1
+	}
+
+	// If cursor is above scroll region, scroll up to it
+	if tab.CursorRow < tab.ScrollRow {
+		tab.ScrollRow = tab.CursorRow
+	}
+
+	// Count visual rows from ScrollRow to cursor to see if cursor is on screen
+	for {
+		visualRow := 0
+		for lineIdx := tab.ScrollRow; lineIdx <= tab.CursorRow && lineIdx < tab.Buffer.LineCount(); lineIdx++ {
+			line := tab.Buffer.Line(lineIdx)
+			segs := wrapLine(line, editorWidth, e.tabSize)
+			if lineIdx == tab.CursorRow {
+				// Find which segment the cursor is in
+				for _, seg := range segs {
+					if tab.CursorCol >= seg.startCol && tab.CursorCol <= seg.endCol {
+						if tab.CursorCol == seg.endCol && seg.endCol < len(line) {
+							continue // cursor at boundary, belongs to next segment
+						}
+						// Cursor is on this visual row
+						if visualRow < height {
+							return // cursor is visible
+						}
+						// Not visible — need to scroll down
+						tab.ScrollRow++
+						break
+					}
+					visualRow++
+				}
+				break
+			}
+			visualRow += len(segs)
+		}
+		if visualRow < height {
+			return
+		}
+		tab.ScrollRow++
+		if tab.ScrollRow > tab.CursorRow {
+			tab.ScrollRow = tab.CursorRow
+			return
+		}
 	}
 }
 
@@ -549,7 +782,7 @@ func (e *Editor) clipboardCopy(text string) {
 		return
 	}
 	cmd.Stdin = strings.NewReader(text)
-	cmd.Run()
+	_ = cmd.Run()
 }
 
 func (e *Editor) clipboardPaste() string {
@@ -1031,7 +1264,19 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 
 	e.clampCursor(tab)
 	e.ensureCursorVisible(tab)
-	e.notifyChange()
+
+	switch action {
+	case ActionInsertChar, ActionInsertNewline, ActionInsertTab,
+		ActionDeleteChar, ActionBackspace, ActionDeleteWord, ActionDeleteLine,
+		ActionCut, ActionPaste, ActionUndo, ActionRedo,
+		ActionOverwriteChar, ActionJoinLine,
+		ActionOpenLineBelow, ActionOpenLineAbove,
+		ActionDeleteCharForward, ActionPasteAfter, ActionPasteBefore,
+		ActionDeleteToLineEnd, ActionChangeToLineEnd:
+		e.notifyChange()
+	default:
+		e.notifyCursorMove()
+	}
 }
 
 // Find searches for text and positions cursor
@@ -1210,6 +1455,13 @@ func (e *Editor) Draw(screen tcell.Screen) {
 	}
 	highlighted := e.cachedHL
 
+	// Word wrap mode: different rendering path
+	if e.wordWrap {
+		tab.ScrollCol = 0 // no horizontal scrolling in wrap mode
+		e.drawWrapped(screen, x, y, width, height, gutterW, tab, highlighted)
+		return
+	}
+
 	// Draw gutter + editor content
 	for row := 0; row < height; row++ {
 		lineIdx := tab.ScrollRow + row
@@ -1291,15 +1543,17 @@ func (e *Editor) Draw(screen tcell.Screen) {
 
 	// Draw cursor only when focused
 	if e.hasFocus {
-		cursorScreenX := x + gutterW + tab.CursorCol - tab.ScrollCol
+		line := tab.Buffer.Line(tab.CursorRow)
+		cursorCol := byteOffsetToScreenCol(line, tab.CursorCol, e.tabSize)
+		scrollCol := byteOffsetToScreenCol(line, tab.ScrollCol, e.tabSize)
+		cursorScreenX := x + gutterW + cursorCol - scrollCol
 		cursorScreenY := y + tab.CursorRow - tab.ScrollRow
 		if cursorScreenY >= y && cursorScreenY < y+height && cursorScreenX >= x+gutterW && cursorScreenX < x+width {
 			if e.keyMode.CursorStyle() == keymode.CursorBlock {
 				// Block cursor: draw char at cursor position with reversed colors
 				ch := ' '
-				line := tab.Buffer.Line(tab.CursorRow)
 				if tab.CursorCol < len(line) {
-					ch = rune(line[tab.CursorCol])
+					ch, _ = utf8.DecodeRuneInString(line[tab.CursorCol:])
 				}
 				style := tcell.StyleDefault.Foreground(ui.ColorBg).Background(ui.ColorText)
 				screen.SetContent(cursorScreenX, cursorScreenY, ch, nil, style)
@@ -1313,6 +1567,262 @@ func (e *Editor) Draw(screen tcell.Screen) {
 	// Draw completion popup on top
 	if e.completion.Visible() {
 		e.completion.Draw(screen, x, y, gutterW, tab.ScrollRow, tab.ScrollCol)
+	}
+}
+
+// drawWrapped renders the editor content with word wrapping enabled.
+func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW int, tab *Tab, highlighted []HighlightedLine) {
+	editorWidth := width - gutterW
+	if editorWidth < 1 {
+		editorWidth = 1
+	}
+
+	cursorScreenX := -1
+	cursorScreenY := -1
+	visualRow := 0
+	lineIdx := tab.ScrollRow
+
+	for visualRow < height && lineIdx < tab.Buffer.LineCount() {
+		line := tab.Buffer.Line(lineIdx)
+		segs := wrapLine(line, editorWidth, e.tabSize)
+
+		for segIdx, seg := range segs {
+			if visualRow >= height {
+				break
+			}
+
+			// Clear the visual row
+			for cx := x; cx < x+width; cx++ {
+				screen.SetContent(cx, y+visualRow, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
+			}
+
+			// Draw gutter: line number on first segment, blank on continuations
+			if e.showLineNumbers {
+				gutterStyle := tcell.StyleDefault.Foreground(ui.ColorGutterText).Background(ui.ColorGutterBg)
+				if segIdx == 0 {
+					e.drawGutterForLine(screen, x, y+visualRow, gutterW, lineIdx, tab)
+				} else {
+					// Blank gutter for continuation lines
+					for i := 0; i < gutterW; i++ {
+						screen.SetContent(x+i, y+visualRow, ' ', nil, gutterStyle)
+					}
+				}
+			}
+
+			// Draw the segment content
+			editorX := x + gutterW
+			if lineIdx < len(highlighted) {
+				e.drawHighlightedLineSegment(screen, editorX, y+visualRow, editorWidth, line, highlighted[lineIdx], lineIdx, tab, seg.startCol, seg.endCol)
+			} else {
+				e.drawPlainLineSegment(screen, editorX, y+visualRow, editorWidth, line, lineIdx, tab, seg.startCol, seg.endCol)
+			}
+
+			// Track cursor position (convert byte offsets to screen columns)
+			if lineIdx == tab.CursorRow && tab.CursorCol >= seg.startCol && tab.CursorCol <= seg.endCol {
+				if tab.CursorCol == seg.endCol && segIdx < len(segs)-1 {
+					// Cursor at exact boundary — it belongs to the next segment
+				} else {
+					cursorScreenCol := byteOffsetToScreenCol(line, tab.CursorCol, e.tabSize)
+					segStartScreenCol := byteOffsetToScreenCol(line, seg.startCol, e.tabSize)
+					cursorScreenX = editorX + cursorScreenCol - segStartScreenCol
+					cursorScreenY = y + visualRow
+				}
+			}
+
+			visualRow++
+		}
+		lineIdx++
+	}
+
+	// Fill remaining rows with tildes
+	for visualRow < height {
+		for cx := x; cx < x+width; cx++ {
+			screen.SetContent(cx, y+visualRow, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
+		}
+		screen.SetContent(x+gutterW, y+visualRow, '~', nil, tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorBg))
+		visualRow++
+	}
+
+	// Draw cursor
+	if e.hasFocus && cursorScreenX >= 0 && cursorScreenY >= 0 {
+		if cursorScreenX < x+width {
+			if e.keyMode.CursorStyle() == keymode.CursorBlock {
+				ch := ' '
+				curLine := tab.Buffer.Line(tab.CursorRow)
+				if tab.CursorCol < len(curLine) {
+					ch, _ = utf8.DecodeRuneInString(curLine[tab.CursorCol:])
+				}
+				style := tcell.StyleDefault.Foreground(ui.ColorBg).Background(ui.ColorText)
+				screen.SetContent(cursorScreenX, cursorScreenY, ch, nil, style)
+				screen.HideCursor()
+			} else {
+				screen.ShowCursor(cursorScreenX, cursorScreenY)
+			}
+		}
+	}
+
+	// Draw completion popup on top
+	if e.completion.Visible() {
+		e.completion.Draw(screen, x, y, gutterW, tab.ScrollRow, tab.ScrollCol)
+	}
+}
+
+// drawGutterForLine draws the gutter (line number, breakpoint, diagnostic) for a given logical line.
+func (e *Editor) drawGutterForLine(screen tcell.Screen, x, y, gutterW, lineIdx int, tab *Tab) {
+	gutterStr := FormatGutterLine(lineIdx+1, tab.Buffer.LineCount())
+	gutterStyle := tcell.StyleDefault.Foreground(ui.ColorGutterText).Background(ui.ColorGutterBg)
+
+	// Check for breakpoint marker
+	if e.hasBreakpoint != nil && tab.FilePath != "" && e.hasBreakpoint(tab.FilePath, lineIdx+1) {
+		screen.SetContent(x, y, '*', nil,
+			tcell.StyleDefault.Foreground(tcell.ColorRed).Background(ui.ColorGutterBg).Bold(true))
+		for i, ch := range gutterStr {
+			if i > 0 && x+i < x+gutterW {
+				screen.SetContent(x+i, y, ch, nil, gutterStyle)
+			}
+		}
+		return
+	}
+
+	// Check for diagnostic marker
+	if tab.FilePath != "" {
+		if diags, ok := e.diagnostics[tab.FilePath]; ok {
+			if diag, ok := diags[lineIdx]; ok {
+				markerCh := '!'
+				markerFg := tcell.ColorYellow
+				if diag.Severity == 1 {
+					markerCh = 'E'
+					markerFg = tcell.ColorRed
+				} else if diag.Severity == 2 {
+					markerCh = 'W'
+					markerFg = tcell.ColorYellow
+				}
+				screen.SetContent(x, y, markerCh, nil,
+					tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg).Bold(true))
+				for i, ch := range gutterStr {
+					if i > 0 && x+i < x+gutterW {
+						screen.SetContent(x+i, y, ch, nil, gutterStyle)
+					}
+				}
+				return
+			}
+		}
+	}
+
+	for i, ch := range gutterStr {
+		if x+i < x+gutterW {
+			screen.SetContent(x+i, y, ch, nil, gutterStyle)
+		}
+	}
+}
+
+// drawHighlightedLineSegment draws a segment [startCol, endCol) of a highlighted line.
+// startCol and endCol are byte offsets. Selection uses global byte offset i via
+// isInSelection, so selection highlighting works correctly across wrap boundaries.
+func (e *Editor) drawHighlightedLineSegment(screen tcell.Screen, x, y, maxWidth int, rawLine string, hl HighlightedLine, lineIdx int, tab *Tab, startCol, endCol int) {
+	startScreenCol := byteOffsetToScreenCol(rawLine, startCol, e.tabSize)
+	screenCol := startScreenCol
+	for i, ch := range rawLine {
+		if i < startCol {
+			continue
+		}
+		if i >= endCol {
+			break
+		}
+		if ch == '\t' {
+			tabW := e.tabSize - (screenCol % e.tabSize)
+			for t := 0; t < tabW; t++ {
+				sx := x + screenCol - startScreenCol + t
+				if sx >= x+maxWidth {
+					break
+				}
+				style := e.hlStyleAt(hl, i, tab, lineIdx)
+				screen.SetContent(sx, y, ' ', nil, style)
+			}
+			screenCol += tabW
+			continue
+		}
+		sx := x + screenCol - startScreenCol
+		if sx >= x+maxWidth {
+			break
+		}
+		style := e.hlStyleAt(hl, i, tab, lineIdx)
+		screen.SetContent(sx, y, ch, nil, style)
+		screenCol++
+	}
+}
+
+// drawPlainLineSegment draws a segment [startCol, endCol) of a plain line.
+// startCol and endCol are byte offsets. Selection uses global byte offset i via
+// isInSelection, so selection highlighting works correctly across wrap boundaries.
+func (e *Editor) drawPlainLineSegment(screen tcell.Screen, x, y, maxWidth int, line string, lineIdx int, tab *Tab, startCol, endCol int) {
+	startScreenCol := byteOffsetToScreenCol(line, startCol, e.tabSize)
+	screenCol := startScreenCol
+	for i, ch := range line {
+		if i < startCol {
+			continue
+		}
+		if i >= endCol {
+			break
+		}
+		if ch == '\t' {
+			tabW := e.tabSize - (screenCol % e.tabSize)
+			for t := 0; t < tabW; t++ {
+				sx := x + screenCol - startScreenCol + t
+				if sx >= x+maxWidth {
+					break
+				}
+				style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
+				if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
+					style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
+				}
+				screen.SetContent(sx, y, ' ', nil, style)
+			}
+			screenCol += tabW
+			continue
+		}
+		sx := x + screenCol - startScreenCol
+		if sx >= x+maxWidth {
+			break
+		}
+		style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
+		if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
+			style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
+		}
+		screen.SetContent(sx, y, ch, nil, style)
+		screenCol++
+	}
+}
+
+// handleWrappedClick maps a visual click position to a logical cursor position in wrap mode.
+// clickX is in screen columns; we convert it to a byte offset within the segment.
+func (e *Editor) handleWrappedClick(tab *Tab, clickX, clickY, width, gutterW int) {
+	editorWidth := width - gutterW
+	if editorWidth < 1 {
+		editorWidth = 1
+	}
+
+	visualRow := 0
+	for lineIdx := tab.ScrollRow; lineIdx < tab.Buffer.LineCount(); lineIdx++ {
+		line := tab.Buffer.Line(lineIdx)
+		segs := wrapLine(line, editorWidth, e.tabSize)
+		for _, seg := range segs {
+			if visualRow == clickY {
+				tab.CursorRow = lineIdx
+				// Convert clickX screen columns to byte offset within segment
+				segStartScreenCol := byteOffsetToScreenCol(line, seg.startCol, e.tabSize)
+				targetScreenCol := segStartScreenCol + clickX
+				tab.CursorCol = screenColToByteOffset(line, targetScreenCol, e.tabSize)
+				if tab.CursorCol > seg.endCol {
+					tab.CursorCol = seg.endCol
+				}
+				e.clampCursor(tab)
+				e.clearSelection(tab)
+				e.notifyChange()
+				return
+			}
+			visualRow++
+		}
 	}
 }
 
@@ -1352,48 +1862,77 @@ func (e *Editor) drawTabBar(screen tcell.Screen, x, y, width int) {
 }
 
 func (e *Editor) drawHighlightedLine(screen tcell.Screen, x, y, maxWidth int, rawLine string, hl HighlightedLine, lineIdx int, tab *Tab) {
+	scrollScreenCol := byteOffsetToScreenCol(rawLine, tab.ScrollCol, e.tabSize)
+	screenCol := 0
 	for i, ch := range rawLine {
-		sx := x + i - tab.ScrollCol
-		if sx < x {
+		if ch == '\t' {
+			tabW := e.tabSize - (screenCol % e.tabSize)
+			for t := 0; t < tabW; t++ {
+				sx := x + screenCol - scrollScreenCol + t
+				if sx >= x && sx < x+maxWidth {
+					style := e.hlStyleAt(hl, i, tab, lineIdx)
+					screen.SetContent(sx, y, ' ', nil, style)
+				}
+			}
+			screenCol += tabW
 			continue
 		}
-		if sx >= x+maxWidth {
-			break
+		sx := x + screenCol - scrollScreenCol
+		if sx >= x && sx < x+maxWidth {
+			style := e.hlStyleAt(hl, i, tab, lineIdx)
+			screen.SetContent(sx, y, ch, nil, style)
 		}
-
-		fg := ui.ColorText
-		bold := false
-		if i < len(hl.Styles) {
-			fg = hl.Styles[i].Fg
-			bold = hl.Styles[i].Bold
-		}
-
-		style := tcell.StyleDefault.Foreground(fg).Background(ui.ColorBg)
-		if bold {
-			style = style.Bold(true)
-		}
-
-		// Selection overrides colors
-		if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
-			style = tcell.StyleDefault.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
-		}
-
-		screen.SetContent(sx, y, ch, nil, style)
+		screenCol++
 	}
 }
 
 func (e *Editor) drawPlainLine(screen tcell.Screen, x, y, maxWidth int, line string, lineIdx int, tab *Tab) {
+	scrollScreenCol := byteOffsetToScreenCol(line, tab.ScrollCol, e.tabSize)
+	screenCol := 0
 	for i, ch := range line {
-		sx := x + i - tab.ScrollCol
-		if sx < x || sx >= x+maxWidth {
+		if ch == '\t' {
+			tabW := e.tabSize - (screenCol % e.tabSize)
+			for t := 0; t < tabW; t++ {
+				sx := x + screenCol - scrollScreenCol + t
+				if sx >= x && sx < x+maxWidth {
+					style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
+					if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
+						style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
+					}
+					screen.SetContent(sx, y, ' ', nil, style)
+				}
+			}
+			screenCol += tabW
 			continue
 		}
-		style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
-		if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
-			style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
+		sx := x + screenCol - scrollScreenCol
+		if sx >= x && sx < x+maxWidth {
+			style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
+			if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
+				style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
+			}
+			screen.SetContent(sx, y, ch, nil, style)
 		}
-		screen.SetContent(sx, y, ch, nil, style)
+		screenCol++
 	}
+}
+
+// hlStyleAt returns the tcell style for a byte offset in a highlighted line.
+func (e *Editor) hlStyleAt(hl HighlightedLine, byteOff int, tab *Tab, lineIdx int) tcell.Style {
+	fg := ui.ColorText
+	bold := false
+	if byteOff < len(hl.Styles) {
+		fg = hl.Styles[byteOff].Fg
+		bold = hl.Styles[byteOff].Bold
+	}
+	style := tcell.StyleDefault.Foreground(fg).Background(ui.ColorBg)
+	if bold {
+		style = style.Bold(true)
+	}
+	if tab.HasSelect && e.isInSelection(tab, lineIdx, byteOff) {
+		style = tcell.StyleDefault.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
+	}
+	return style
 }
 
 func (e *Editor) isInSelection(tab *Tab, row, col int) bool {
@@ -1474,6 +2013,26 @@ func (e *Editor) InputHandler() func(event *tcell.EventKey, setFocus func(p tvie
 			}
 		}
 
+		// Alt+Left/Right: horizontal viewport scroll (no cursor move)
+		if event.Modifiers()&tcell.ModAlt != 0 && !e.wordWrap {
+			tab := e.ActiveTab()
+			if tab != nil {
+				switch event.Key() {
+				case tcell.KeyLeft:
+					if tab.ScrollCol > 0 {
+						tab.ScrollCol -= 3
+						if tab.ScrollCol < 0 {
+							tab.ScrollCol = 0
+						}
+					}
+					return
+				case tcell.KeyRight:
+					tab.ScrollCol += 3
+					return
+				}
+			}
+		}
+
 		// Use the key mapper to process the event
 		ctx := e.KeyModeContext()
 		result := e.keyMode.ProcessKey(event, ctx)
@@ -1516,7 +2075,7 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 		}
 
 		mx, my := event.Position()
-		bx, by, _, _ := e.GetInnerRect()
+		bx, by, bw, _ := e.GetInnerRect()
 
 		tab := e.ActiveTab()
 		if tab == nil {
@@ -1547,28 +2106,66 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 		switch action {
 		case tview.MouseLeftClick:
 			setFocus(e)
-			row := tab.ScrollRow + editorY
-			col := editorX + tab.ScrollCol
-			if row >= 0 && row < tab.Buffer.LineCount() {
-				tab.CursorRow = row
-				tab.CursorCol = col
-				e.clampCursor(tab)
-				e.clearSelection(tab)
-				e.notifyChange()
+			if e.wordWrap {
+				e.handleWrappedClick(tab, editorX, editorY, bw, gutterW)
+			} else {
+				row := tab.ScrollRow + editorY
+				col := editorX + tab.ScrollCol
+				if row >= 0 && row < tab.Buffer.LineCount() {
+					tab.CursorRow = row
+					tab.CursorCol = col
+					e.clampCursor(tab)
+					e.clearSelection(tab)
+					e.notifyChange()
+				}
 			}
 			return true, nil
 		case tview.MouseScrollUp:
-			if tab.ScrollRow > 0 {
-				tab.ScrollRow -= 3
-				if tab.ScrollRow < 0 {
-					tab.ScrollRow = 0
+			// Shift+Scroll = horizontal scroll left
+			if event.Modifiers()&tcell.ModShift != 0 {
+				if !e.wordWrap && tab.ScrollCol > 0 {
+					tab.ScrollCol -= 3
+					if tab.ScrollCol < 0 {
+						tab.ScrollCol = 0
+					}
+					e.notifyChange()
+				}
+			} else {
+				if tab.ScrollRow > 0 {
+					tab.ScrollRow -= 3
+					if tab.ScrollRow < 0 {
+						tab.ScrollRow = 0
+					}
+					e.notifyChange()
+				}
+			}
+			return true, nil
+		case tview.MouseScrollDown:
+			// Shift+Scroll = horizontal scroll right
+			if event.Modifiers()&tcell.ModShift != 0 {
+				if !e.wordWrap {
+					tab.ScrollCol += 3
+					e.notifyChange()
+				}
+			} else {
+				if tab.ScrollRow < tab.Buffer.LineCount()-1 {
+					tab.ScrollRow += 3
+					e.notifyChange()
+				}
+			}
+			return true, nil
+		case tview.MouseScrollLeft:
+			if !e.wordWrap && tab.ScrollCol > 0 {
+				tab.ScrollCol -= 3
+				if tab.ScrollCol < 0 {
+					tab.ScrollCol = 0
 				}
 				e.notifyChange()
 			}
 			return true, nil
-		case tview.MouseScrollDown:
-			if tab.ScrollRow < tab.Buffer.LineCount()-1 {
-				tab.ScrollRow += 3
+		case tview.MouseScrollRight:
+			if !e.wordWrap {
+				tab.ScrollCol += 3
 				e.notifyChange()
 			}
 			return true, nil

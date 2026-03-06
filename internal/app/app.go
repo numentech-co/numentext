@@ -83,8 +83,11 @@ func (a *App) setupUI() {
 	// Create components
 	a.editor = editor.NewEditor()
 	a.editor.SetShowLineNumbers(a.config.ShowLineNum)
+	a.editor.SetWordWrap(a.config.WordWrap)
+	a.editor.SetTabSize(a.config.TabSize)
 	a.menuBar = ui.NewMenuBar()
 	a.statusBar = ui.NewStatusBar()
+	a.statusBar.SetWordWrap(a.config.WordWrap)
 	a.fileTree = filetree.New(a.workDir)
 	a.output = output.New()
 	a.termPanel = terminal.NewPanel()
@@ -249,19 +252,25 @@ func (a *App) setupMenus() {
 			{Label: "Toggle Line Numbers", Action: func() {
 				a.config.ShowLineNum = !a.config.ShowLineNum
 				a.editor.SetShowLineNumbers(a.config.ShowLineNum)
-				a.config.Save()
+				_ = a.config.Save()
+			}},
+			{Label: "Toggle Word Wrap", Action: func() {
+				a.config.WordWrap = !a.config.WordWrap
+				a.editor.SetWordWrap(a.config.WordWrap)
+				a.statusBar.SetWordWrap(a.config.WordWrap)
+				_ = a.config.Save()
 			}},
 			{Label: "Keyboard: Default", Shortcut: "Ctrl+Shift+M", Action: func() {
 				a.setKeyboardMode("default")
-				a.config.Save()
+				_ = a.config.Save()
 			}},
 			{Label: "Keyboard: Vi", Action: func() {
 				a.setKeyboardMode("vi")
-				a.config.Save()
+				_ = a.config.Save()
 			}},
 			{Label: "Keyboard: Helix", Action: func() {
 				a.setKeyboardMode("helix")
-				a.config.Save()
+				_ = a.config.Save()
 			}},
 		},
 	}
@@ -394,26 +403,26 @@ func (a *App) setupKeybindings() {
 			case tcell.KeyLeft:
 				a.layout.SetFileTreeWidth(a.layout.FileTreeWidth() - 2)
 				a.config.FileTreeWidth = a.layout.FileTreeWidth()
-				a.config.Save()
+				_ = a.config.Save()
 				return nil
 			case tcell.KeyRight:
 				a.layout.SetFileTreeWidth(a.layout.FileTreeWidth() + 2)
 				a.config.FileTreeWidth = a.layout.FileTreeWidth()
-				a.config.Save()
+				_ = a.config.Save()
 				return nil
 			case tcell.KeyUp:
 				_, _, _, screenH := a.layout.MainGrid.GetRect()
 				maxH := screenH / 2
 				a.layout.SetOutputHeight(a.layout.OutputHeight()+2, maxH)
 				a.config.OutputHeight = a.layout.OutputHeight()
-				a.config.Save()
+				_ = a.config.Save()
 				return nil
 			case tcell.KeyDown:
 				_, _, _, screenH := a.layout.MainGrid.GetRect()
 				maxH := screenH / 2
 				a.layout.SetOutputHeight(a.layout.OutputHeight()-2, maxH)
 				a.config.OutputHeight = a.layout.OutputHeight()
-				a.config.Save()
+				_ = a.config.Save()
 				return nil
 			}
 		}
@@ -574,6 +583,9 @@ func (a *App) setupKeybindings() {
 
 func (a *App) setupMouse() {
 	a.tviewApp.SetMouseCapture(func(event *tcell.EventMouse, action tview.MouseAction) (*tcell.EventMouse, tview.MouseAction) {
+		if event == nil {
+			return event, action
+		}
 		x, y := event.Position()
 
 		switch action {
@@ -629,7 +641,26 @@ func (a *App) setupMouse() {
 		case tview.MouseLeftUp:
 			if a.dragging != "" {
 				a.dragging = ""
-				a.config.Save()
+				_ = a.config.Save()
+				return nil, tview.MouseConsumed
+			}
+
+		case tview.MouseScrollUp, tview.MouseScrollDown:
+			// Handle scroll directly for the terminal panel
+			if a.termVisible && a.termPanel.InRect(x, y) {
+				if action == tview.MouseScrollUp {
+					a.termPanel.ScrollBy(3)
+				} else {
+					a.termPanel.ScrollBy(-3)
+				}
+				return nil, tview.MouseConsumed
+			}
+			// Forward scroll events to the output panel if mouse is over it
+			if a.layout.OutputVisible() && a.output.InRect(x, y) {
+				handler := a.output.MouseHandler()
+				handler(action, event, func(p tview.Primitive) {
+					a.tviewApp.SetFocus(p)
+				})
 				return nil, tview.MouseConsumed
 			}
 		}
@@ -767,7 +798,7 @@ func (a *App) showFilePalette() {
 			a.output.AppendError("Error opening file: " + err.Error())
 		} else {
 			a.config.AddRecentFile(entry.FullPath)
-			a.config.Save()
+			_ = a.config.Save()
 		}
 		a.tviewApp.SetFocus(a.editor)
 	}, func() {
@@ -836,7 +867,7 @@ func (a *App) openFile() {
 				a.output.AppendError("Error opening file: " + err.Error())
 			} else {
 				a.config.AddRecentFile(result.FilePath)
-				a.config.Save()
+				_ = a.config.Save()
 			}
 		}
 		a.tviewApp.SetFocus(a.editor)
@@ -878,7 +909,7 @@ func (a *App) saveFileAs() {
 				a.output.AppendError("Error saving: " + err.Error())
 			} else {
 				a.config.AddRecentFile(result.FilePath)
-				a.config.Save()
+				_ = a.config.Save()
 				a.statusBar.SetMessage("File saved: " + result.FilePath)
 			}
 		}
@@ -1376,7 +1407,7 @@ func (a *App) startDebug() {
 		_ = a.editor.SaveCurrentFile()
 	}
 	a.output.Clear()
-	go a.dapManager.StartSession(tab.FilePath)
+	go func() { _ = a.dapManager.StartSession(tab.FilePath) }()
 }
 
 func (a *App) stopDebug() {
@@ -1601,7 +1632,7 @@ func (a *App) cycleKeyboardMode() {
 		next = "default"
 	}
 	a.setKeyboardMode(next)
-	a.config.Save()
+	_ = a.config.Save()
 	a.statusBar.SetMessage("Keyboard mode: " + a.editor.KeyMode().Mode())
 }
 
