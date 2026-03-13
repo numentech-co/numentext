@@ -85,7 +85,6 @@ func (l *Layout) SetOutputVisible(visible bool, height int) {
 			return
 		}
 		l.outputHeight = 0
-		height = 0
 	}
 	l.rebuildMainFlex()
 }

@@ -23,6 +23,9 @@ type BlockTracker struct {
 	promptLine    string        // accumulates prompt text for heuristic fallback
 	commandLine   string        // accumulates command text
 	curLine       string        // current line being written
+	curCol        int           // current column position (for cursor tracking)
+	pendingLine   string        // saved by CR for the next LF (\r\n handling)
+	userInput     string        // accumulates typed characters from WriteInput (not PTY echo)
 }
 
 // NewBlockTracker creates a new block tracker.
@@ -93,6 +96,34 @@ func (bt *BlockTracker) FeedChar(ch rune) {
 		bt.commandLine += string(ch)
 	}
 	bt.curLine += string(ch)
+	bt.curCol++
+}
+
+// FeedCursorMove is called when the cursor moves to a new column position.
+// If the cursor moves right, spaces are inserted to preserve text spacing.
+// If it moves left (like CR), the curLine may be overwritten.
+func (bt *BlockTracker) FeedCursorMove(newCol int) {
+	if bt.altScreen {
+		return
+	}
+	if newCol > bt.curCol {
+		// Cursor moved right — fill with spaces
+		gap := newCol - bt.curCol
+		for i := 0; i < gap; i++ {
+			bt.curLine += " "
+			if bt.inCommand {
+				bt.commandLine += " "
+			}
+		}
+		bt.curCol = newCol
+	} else if newCol < bt.curCol {
+		// Cursor moved left — truncate curLine if longer than newCol
+		runes := []rune(bt.curLine)
+		if newCol < len(runes) {
+			bt.curLine = string(runes[:newCol])
+		}
+		bt.curCol = newCol
+	}
 }
 
 // FeedNewline is called when a newline (LF) occurs.
@@ -100,20 +131,34 @@ func (bt *BlockTracker) FeedNewline() {
 	if bt.altScreen {
 		return
 	}
+	// Use pendingLine if CR cleared curLine (handles \r\n sequences)
+	line := bt.curLine
+	if line == "" && bt.pendingLine != "" {
+		line = bt.pendingLine
+	}
+	bt.pendingLine = ""
 	// Capture output: either in OSC 133 output phase, or in heuristic mode
 	// with an active unfinished block
 	if bt.active != nil && !bt.active.Finished {
 		if bt.inOutput || !bt.hasSeenOSC133 {
-			bt.active.Output = append(bt.active.Output, bt.curLine)
+			// Skip empty leading output lines (from echoed \r\n after Enter)
+			if line != "" || len(bt.active.Output) > 0 {
+				bt.active.Output = append(bt.active.Output, line)
+			}
 		}
 	}
 	bt.curLine = ""
+	bt.curCol = 0
 }
 
 // FeedCR is called on carriage return.
 func (bt *BlockTracker) FeedCR() {
-	// CR just resets the line position; we'll overwrite curLine content
+	// Save curLine before clearing — \r\n sequences need this for FeedNewline
+	if bt.curLine != "" {
+		bt.pendingLine = bt.curLine
+	}
 	bt.curLine = ""
+	bt.curCol = 0
 }
 
 // HeuristicPrompt attempts prompt detection when OSC 133 is not available.
@@ -142,9 +187,29 @@ func (bt *BlockTracker) HeuristicCommand(cmd string) {
 	bt.Blocks = append(bt.Blocks, bt.active)
 }
 
+// FeedUserInput records a character typed by the user (from WriteInput, not PTY echo).
+// This gives us clean command text without prompt prefixes or echo artifacts.
+func (bt *BlockTracker) FeedUserInput(ch rune) {
+	bt.userInput += string(ch)
+}
+
+// BackspaceUserInput removes the last character from user input (for backspace/delete).
+func (bt *BlockTracker) BackspaceUserInput() {
+	if len(bt.userInput) > 0 {
+		// Remove last rune
+		runes := []rune(bt.userInput)
+		bt.userInput = string(runes[:len(runes)-1])
+	}
+}
+
+// ClearUserInput resets the user input buffer.
+func (bt *BlockTracker) ClearUserInput() {
+	bt.userInput = ""
+}
+
 // HeuristicEnter is called when the user presses Enter.
 // If OSC 133 is not active and there's no current active block,
-// it uses the accumulated current line as a command.
+// it uses the tracked user input as the command text.
 func (bt *BlockTracker) HeuristicEnter() {
 	if bt.altScreen {
 		return
@@ -153,12 +218,28 @@ func (bt *BlockTracker) HeuristicEnter() {
 	if bt.inPrompt || bt.inCommand || bt.inOutput {
 		return
 	}
-	cmd := strings.TrimSpace(bt.curLine)
+	// Prefer userInput (typed chars) over curLine (PTY echo which includes prompt)
+	cmd := strings.TrimSpace(bt.userInput)
 	if cmd == "" {
+		// Fallback to curLine with prompt stripping
+		cmd = strings.TrimSpace(bt.curLine)
+		if cmd != "" {
+			cmd = stripPrompt(cmd)
+		}
+	}
+	if cmd == "" {
+		bt.userInput = ""
 		return
 	}
-	// If there's an active unfinished block, finish it first
+	// If there's an active unfinished block, check whether the shell prompt
+	// has returned (meaning the previous command finished). If not, the Enter
+	// keypress is going to the running program (e.g. Claude Code) — don't
+	// create a new block.
 	if bt.active != nil && !bt.active.Finished {
+		if !bt.isAtShellPrompt() {
+			bt.userInput = ""
+			return
+		}
 		bt.active.Finished = true
 	}
 	bt.active = &CommandBlock{
@@ -166,6 +247,109 @@ func (bt *BlockTracker) HeuristicEnter() {
 	}
 	bt.Blocks = append(bt.Blocks, bt.active)
 	bt.curLine = ""
+	bt.pendingLine = ""
+	bt.userInput = ""
+}
+
+// isAtShellPrompt checks whether the current line looks like a shell prompt
+// followed by user input. Shell prompts typically end in $, %, or #.
+// Deliberately excludes > (used by Claude Code, PowerShell-like prompts).
+func (bt *BlockTracker) isAtShellPrompt() bool {
+	// Extract the prompt prefix by removing user input from the end of curLine
+	line := bt.curLine
+	if bt.userInput != "" && strings.HasSuffix(line, bt.userInput) {
+		line = strings.TrimSuffix(line, bt.userInput)
+	}
+	line = strings.TrimRight(line, " ")
+	if len(line) < 2 {
+		return false
+	}
+	last := line[len(line)-1]
+	return last == '$' || last == '%' || last == '#'
+}
+
+// stripPrompt removes a shell prompt prefix from a line.
+// Looks for the last occurrence of common prompt characters ($ % > #)
+// followed by a space, and returns everything after it.
+// Returns empty string if a prompt char is found but nothing was typed after it.
+func stripPrompt(line string) string {
+	// Search from the right for prompt chars to handle prompts like
+	// "user@host ~/dir % cmd" or "bash-5.2$ cmd"
+	foundPromptChar := false
+	for i := len(line) - 1; i >= 0; i-- {
+		ch := line[i]
+		if ch == '$' || ch == '%' || ch == '>' || ch == '#' {
+			foundPromptChar = true
+			rest := strings.TrimSpace(line[i+1:])
+			if rest != "" {
+				return rest
+			}
+		}
+	}
+	if foundPromptChar {
+		return "" // prompt found but nothing typed after it
+	}
+	return line
+}
+
+// SnapshotVTOutput replaces the active block's tracked Output with a snapshot
+// of the actual VT cell contents. This produces clean output for TUI programs
+// that use cursor positioning instead of sequential line output.
+func (bt *BlockTracker) SnapshotVTOutput(rows, cols int, cellFn func(row, col int) rune) {
+	if bt.active == nil {
+		return
+	}
+	bt.active.Output = nil
+	for r := 0; r < rows; r++ {
+		var line []rune
+		lastNonSpace := -1
+		for c := 0; c < cols; c++ {
+			ch := cellFn(r, c)
+			if ch == 0 {
+				ch = ' '
+			}
+			line = append(line, ch)
+			if ch != ' ' {
+				lastNonSpace = len(line)
+			}
+		}
+		s := ""
+		if lastNonSpace > 0 {
+			s = string(line[:lastNonSpace])
+		}
+		bt.active.Output = append(bt.active.Output, s)
+	}
+	// Trim trailing empty lines
+	for len(bt.active.Output) > 0 && bt.active.Output[len(bt.active.Output)-1] == "" {
+		bt.active.Output = bt.active.Output[:len(bt.active.Output)-1]
+	}
+	// Trim leading empty lines
+	for len(bt.active.Output) > 0 && bt.active.Output[0] == "" {
+		bt.active.Output = bt.active.Output[1:]
+	}
+}
+
+// FinishActiveBlock marks the active block as finished and clears it.
+func (bt *BlockTracker) FinishActiveBlock() {
+	if bt.active != nil && !bt.active.Finished {
+		bt.active.Finished = true
+		bt.active = nil
+	}
+}
+
+// IsLikelyShellPrompt checks whether curLine looks like a shell prompt.
+// Requires both a prompt-ending char ($, %, #) and a user@host pattern (@).
+// This is used for proactive prompt detection when a command exits.
+func (bt *BlockTracker) IsLikelyShellPrompt() bool {
+	line := strings.TrimRight(bt.curLine, " ")
+	if len(line) < 2 {
+		return false
+	}
+	last := line[len(line)-1]
+	if last != '$' && last != '%' && last != '#' {
+		return false
+	}
+	return strings.Contains(line, "@")
 }
 
 // HasOSC133 returns true if at least one OSC 133 sequence has been processed.
@@ -189,6 +373,17 @@ func (bt *BlockTracker) SelectedBlock(idx int) *CommandBlock {
 // BlockCount returns the number of blocks tracked.
 func (bt *BlockTracker) BlockCount() int {
 	return len(bt.Blocks)
+}
+
+// FinishedCount returns the number of finished blocks.
+func (bt *BlockTracker) FinishedCount() int {
+	n := 0
+	for _, blk := range bt.Blocks {
+		if blk.Finished {
+			n++
+		}
+	}
+	return n
 }
 
 // PlainText returns the full text of a block: command + output joined by newlines.

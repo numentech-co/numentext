@@ -10,6 +10,62 @@ import (
 	"github.com/rivo/tview"
 )
 
+// wrapDialogWithShadow wraps a dialog primitive to draw a shadow behind it in modern mode.
+func wrapDialogWithShadow(inner tview.Primitive, width, height int) tview.Primitive {
+	wrapper := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(&shadowBox{inner: inner, w: width, h: height}, height+1, 0, true).
+			AddItem(nil, 0, 1, false),
+			width+1, 0, true).
+		AddItem(nil, 0, 1, false)
+	return wrapper
+}
+
+// shadowBox wraps a tview.Primitive to draw a shadow around it.
+type shadowBox struct {
+	tview.Box
+	inner tview.Primitive
+	w, h  int
+}
+
+func (s *shadowBox) Draw(screen tcell.Screen) {
+	x, y, _, _ := s.GetRect()
+	// Draw inner at (x, y) with size (s.w, s.h)
+	s.inner.SetRect(x, y, s.w, s.h)
+	s.inner.Draw(screen)
+	// Draw shadow
+	if Style.Modern {
+		DrawShadow(screen, x, y, s.w, s.h)
+	}
+}
+
+func (s *shadowBox) Focus(delegate func(p tview.Primitive)) {
+	s.inner.Focus(delegate)
+}
+
+func (s *shadowBox) HasFocus() bool {
+	return s.inner.HasFocus()
+}
+
+func (s *shadowBox) InputHandler() func(*tcell.EventKey, func(tview.Primitive)) {
+	return s.inner.InputHandler()
+}
+
+func (s *shadowBox) MouseHandler() func(tview.MouseAction, *tcell.EventMouse, func(tview.Primitive)) (bool, tview.Primitive) {
+	return s.inner.MouseHandler()
+}
+
+// setModernTitle sets a dialog title with modern bracket style.
+func setModernTitle(box interface{ SetTitle(string) *tview.Box }, title string) {
+	if Style.Modern {
+		box.SetTitle(Style.TitleLeft() + title + Style.TitleRight())
+	} else {
+		box.SetTitle(" " + title + " ")
+	}
+}
+
 // Dialog types
 type DialogType int
 
@@ -143,7 +199,7 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 	layout.SetBackgroundColor(ColorDialogBg)
 	layout.SetBorder(true)
 	layout.SetBorderColor(ColorStatusText)
-	layout.SetTitle(" Open File ")
+	setModernTitle(layout, "Open File")
 	layout.SetTitleColor(ColorStatusText)
 
 	// Handle escape on file list
@@ -159,17 +215,8 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 		return event
 	})
 
-	// Center the dialog
-	modal := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(layout, 20, 0, true).
-			AddItem(nil, 0, 1, false),
-			60, 0, true).
-		AddItem(nil, 0, 1, false)
-
-	return modal
+	// Center the dialog with shadow
+	return wrapDialogWithShadow(layout, 60, 20)
 }
 
 // SaveFileDialog creates a save file dialog
@@ -183,7 +230,7 @@ func SaveFileDialog(app *tview.Application, currentPath string, onResult func(Di
 	form.SetLabelColor(ColorStatusText)
 	form.SetBorder(true)
 	form.SetBorderColor(ColorStatusText)
-	form.SetTitle(" Save As ")
+	setModernTitle(form, "Save As")
 	form.SetTitleColor(ColorStatusText)
 
 	form.AddInputField("File path:", currentPath, 50, nil, nil)
@@ -203,16 +250,7 @@ func SaveFileDialog(app *tview.Application, currentPath string, onResult func(Di
 		return event
 	})
 
-	modal := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(form, 7, 0, true).
-			AddItem(nil, 0, 1, false),
-			60, 0, true).
-		AddItem(nil, 0, 1, false)
-
-	return modal
+	return wrapDialogWithShadow(form, 60, 7)
 }
 
 // FindDialog creates a find dialog
@@ -226,7 +264,7 @@ func FindDialog(app *tview.Application, onResult func(DialogResult)) tview.Primi
 	form.SetLabelColor(ColorStatusText)
 	form.SetBorder(true)
 	form.SetBorderColor(ColorStatusText)
-	form.SetTitle(" Find ")
+	setModernTitle(form, "Find")
 	form.SetTitleColor(ColorStatusText)
 
 	form.AddInputField("Search:", "", 40, nil, nil)
@@ -246,16 +284,7 @@ func FindDialog(app *tview.Application, onResult func(DialogResult)) tview.Primi
 		return event
 	})
 
-	modal := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(form, 7, 0, true).
-			AddItem(nil, 0, 1, false),
-			55, 0, true).
-		AddItem(nil, 0, 1, false)
-
-	return modal
+	return wrapDialogWithShadow(form, 55, 7)
 }
 
 // ReplaceDialog creates a find & replace dialog
@@ -269,7 +298,7 @@ func ReplaceDialog(app *tview.Application, onFind func(DialogResult), onReplace 
 	form.SetLabelColor(ColorStatusText)
 	form.SetBorder(true)
 	form.SetBorderColor(ColorStatusText)
-	form.SetTitle(" Replace ")
+	setModernTitle(form, "Replace")
 	form.SetTitleColor(ColorStatusText)
 
 	form.AddInputField("Find:", "", 40, nil, nil)
@@ -300,16 +329,7 @@ func ReplaceDialog(app *tview.Application, onFind func(DialogResult), onReplace 
 		return event
 	})
 
-	modal := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(form, 9, 0, true).
-			AddItem(nil, 0, 1, false),
-			60, 0, true).
-		AddItem(nil, 0, 1, false)
-
-	return modal
+	return wrapDialogWithShadow(form, 60, 9)
 }
 
 // GoToLineDialog creates a go-to-line dialog
@@ -323,7 +343,7 @@ func GoToLineDialog(app *tview.Application, onResult func(DialogResult)) tview.P
 	form.SetLabelColor(ColorStatusText)
 	form.SetBorder(true)
 	form.SetBorderColor(ColorStatusText)
-	form.SetTitle(" Go to Line ")
+	setModernTitle(form, "Go to Line")
 	form.SetTitleColor(ColorStatusText)
 
 	form.AddInputField("Line number:", "", 20, tview.InputFieldInteger, nil)
@@ -343,16 +363,7 @@ func GoToLineDialog(app *tview.Application, onResult func(DialogResult)) tview.P
 		return event
 	})
 
-	modal := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(form, 7, 0, true).
-			AddItem(nil, 0, 1, false),
-			45, 0, true).
-		AddItem(nil, 0, 1, false)
-
-	return modal
+	return wrapDialogWithShadow(form, 45, 7)
 }
 
 // ConfirmDialog creates a confirmation dialog
@@ -379,7 +390,7 @@ func AboutDialog(app *tview.Application, onClose func()) tview.Primitive {
 	text.SetDynamicColors(true)
 	text.SetBorder(true)
 	text.SetBorderColor(ColorStatusText)
-	text.SetTitle(" About NumenText ")
+	setModernTitle(text, "About NumenText")
 	text.SetTitleColor(ColorStatusText)
 
 	content := `
@@ -405,14 +416,5 @@ Press Escape to close
 		return event
 	})
 
-	modal := tview.NewFlex().
-		AddItem(nil, 0, 1, false).
-		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(nil, 0, 1, false).
-			AddItem(text, 16, 0, true).
-			AddItem(nil, 0, 1, false),
-			45, 0, true).
-		AddItem(nil, 0, 1, false)
-
-	return modal
+	return wrapDialogWithShadow(text, 45, 16)
 }

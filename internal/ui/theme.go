@@ -9,7 +9,8 @@ var (
 	ColorBgDarker  = tcell.NewRGBColor(0, 0, 100)     // Darker blue
 	ColorMenuBg    = tcell.NewRGBColor(0, 170, 170)    // Cyan
 	ColorStatusBg  = tcell.NewRGBColor(0, 170, 170)    // Cyan
-	ColorOutputBg  = tcell.NewRGBColor(0, 0, 80)       // Very dark blue
+	ColorOutputBg    = tcell.NewRGBColor(0, 0, 80)      // Very dark blue
+	ColorOutputBgAlt = tcell.NewRGBColor(0, 0, 60)     // Slightly darker blue for alternating blocks
 	ColorDialogBg  = tcell.NewRGBColor(0, 170, 170)    // Cyan for dialogs
 	ColorGutterBg  = tcell.NewRGBColor(0, 0, 100)      // Darker blue for gutter
 

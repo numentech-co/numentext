@@ -71,6 +71,19 @@ type Editor struct {
 
 	// Last search query for n/N repeat
 	lastSearch string
+
+	// Breadcrumb: document symbols from LSP
+	breadcrumbSymbols []BreadcrumbSymbol
+	breadcrumbFile    string // file path for cached symbols
+}
+
+// BreadcrumbSymbol represents a symbol for breadcrumb display.
+type BreadcrumbSymbol struct {
+	Name      string
+	Kind      int
+	StartLine int
+	EndLine   int
+	Children  []BreadcrumbSymbol
 }
 
 // DiagnosticInfo holds diagnostic data for a single line
@@ -1437,6 +1450,13 @@ func (e *Editor) Draw(screen tcell.Screen) {
 	y++
 	height--
 
+	// Draw breadcrumb bar in modern mode
+	if ui.Style.Modern && height > 2 {
+		e.drawBreadcrumb(screen, x, y, width)
+		y++
+		height--
+	}
+
 	tab := e.ActiveTab()
 	if tab == nil {
 		return
@@ -1446,6 +1466,13 @@ func (e *Editor) Draw(screen tcell.Screen) {
 	gutterW := 0
 	if e.showLineNumbers {
 		gutterW = GutterWidth(tab.Buffer.LineCount())
+	}
+
+	// Reserve space for scrollbar in modern mode
+	scrollbarW := 0
+	if ui.Style.Modern && tab.Buffer.LineCount() > height {
+		scrollbarW = 1
+		width -= scrollbarW
 	}
 
 	// Highlight all lines (cached)
@@ -1498,15 +1525,7 @@ func (e *Editor) Draw(screen tcell.Screen) {
 			if tab.FilePath != "" {
 				if diags, ok := e.diagnostics[tab.FilePath]; ok {
 					if diag, ok := diags[lineIdx]; ok {
-						markerCh := '!'
-						markerFg := tcell.ColorYellow
-						if diag.Severity == 1 { // error
-							markerCh = 'E'
-							markerFg = tcell.ColorRed
-						} else if diag.Severity == 2 { // warning
-							markerCh = 'W'
-							markerFg = tcell.ColorYellow
-						}
+						markerCh, markerFg := diagnosticMarker(diag.Severity)
 						// Draw marker in first gutter column
 						screen.SetContent(x, y+row, markerCh, nil,
 							tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg).Bold(true))
@@ -1564,9 +1583,84 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		}
 	}
 
+	// Draw scrollbar in modern mode
+	if scrollbarW > 0 {
+		e.drawScrollbar(screen, x+width, y, height, tab)
+	}
+
 	// Draw completion popup on top
 	if e.completion.Visible() {
 		e.completion.Draw(screen, x, y, gutterW, tab.ScrollRow, tab.ScrollCol)
+	}
+}
+
+// drawScrollbar draws a scrollbar track with thumb and markers on the right edge.
+func (e *Editor) drawScrollbar(screen tcell.Screen, x, y, height int, tab *Tab) {
+	totalLines := tab.Buffer.LineCount()
+	if totalLines == 0 || height == 0 {
+		return
+	}
+
+	trackStyle := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorBgDarker)
+	thumbStyle := tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorTextGray)
+
+	// Calculate thumb position and size
+	thumbSize := height * height / totalLines
+	if thumbSize < 1 {
+		thumbSize = 1
+	}
+	if thumbSize > height {
+		thumbSize = height
+	}
+	thumbPos := 0
+	if totalLines > height {
+		thumbPos = tab.ScrollRow * (height - thumbSize) / (totalLines - height)
+	}
+
+	// Draw track
+	for row := 0; row < height; row++ {
+		ch := ui.Style.ScrollTrack()
+		style := trackStyle
+		if row >= thumbPos && row < thumbPos+thumbSize {
+			ch = ui.Style.ScrollThumb()
+			style = thumbStyle
+		}
+		screen.SetContent(x, y+row, ch, nil, style)
+	}
+
+	// Draw markers at proportional positions
+	if tab.FilePath != "" {
+		// Diagnostic markers
+		if diags, ok := e.diagnostics[tab.FilePath]; ok {
+			for lineIdx, diag := range diags {
+				markerRow := lineIdx * height / totalLines
+				if markerRow >= height {
+					markerRow = height - 1
+				}
+				markerFg := tcell.ColorBlue
+				if diag.Severity == 1 {
+					markerFg = tcell.ColorRed
+				} else if diag.Severity == 2 {
+					markerFg = tcell.ColorYellow
+				}
+				screen.SetContent(x, y+markerRow, '\u2588', nil,
+					tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorBgDarker))
+			}
+		}
+
+		// Breakpoint markers
+		if e.hasBreakpoint != nil {
+			for lineIdx := 0; lineIdx < totalLines; lineIdx++ {
+				if e.hasBreakpoint(tab.FilePath, lineIdx+1) {
+					markerRow := lineIdx * height / totalLines
+					if markerRow >= height {
+						markerRow = height - 1
+					}
+					screen.SetContent(x, y+markerRow, '\u25cf', nil,
+						tcell.StyleDefault.Foreground(tcell.ColorRed).Background(ui.ColorBgDarker))
+				}
+			}
+		}
 	}
 }
 
@@ -1667,6 +1761,116 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 	}
 }
 
+// SetBreadcrumbSymbols sets the document symbols for breadcrumb display.
+func (e *Editor) SetBreadcrumbSymbols(filePath string, symbols []BreadcrumbSymbol) {
+	e.breadcrumbFile = filePath
+	e.breadcrumbSymbols = symbols
+}
+
+// BreadcrumbPath returns the symbol path at the current cursor position.
+func (e *Editor) BreadcrumbPath() []string {
+	tab := e.ActiveTab()
+	if tab == nil || tab.FilePath != e.breadcrumbFile || len(e.breadcrumbSymbols) == 0 {
+		return nil
+	}
+	var path []string
+	findSymbol(e.breadcrumbSymbols, tab.CursorRow, &path)
+	return path
+}
+
+func findSymbol(symbols []BreadcrumbSymbol, line int, path *[]string) {
+	for i := range symbols {
+		s := &symbols[i]
+		if line >= s.StartLine && line <= s.EndLine {
+			*path = append(*path, s.Name)
+			if len(s.Children) > 0 {
+				findSymbol(s.Children, line, path)
+			}
+			return
+		}
+	}
+}
+
+// drawBreadcrumb draws the breadcrumb bar.
+func (e *Editor) drawBreadcrumb(screen tcell.Screen, x, y, width int) {
+	style := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorBgDarker)
+	// Clear breadcrumb bar
+	for cx := x; cx < x+width; cx++ {
+		screen.SetContent(cx, y, ' ', nil, style)
+	}
+
+	tab := e.ActiveTab()
+	if tab == nil {
+		return
+	}
+
+	// Build breadcrumb text
+	parts := e.BreadcrumbPath()
+	sep := " " + ui.Style.BreadcrumbSep() + " "
+
+	text := ""
+	if tab.FilePath != "" {
+		// Show filename as first segment
+		name := tab.Name
+		text = name
+	}
+
+	for _, part := range parts {
+		if text != "" {
+			text += sep
+		}
+		text += part
+	}
+
+	if text == "" {
+		return
+	}
+
+	// Render
+	nameStyle := tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBgDarker)
+	sepStyle := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorBgDarker)
+
+	cx := x + 1
+	inSep := false
+	for _, ch := range " " + text {
+		if cx >= x+width {
+			break
+		}
+		// Detect separator characters
+		isSepChar := false
+		for _, sc := range sep {
+			if ch == sc {
+				isSepChar = true
+				break
+			}
+		}
+		if isSepChar {
+			inSep = true
+		} else if inSep {
+			inSep = false
+		}
+
+		if inSep {
+			screen.SetContent(cx, y, ch, nil, sepStyle)
+		} else {
+			screen.SetContent(cx, y, ch, nil, nameStyle)
+		}
+		cx++
+	}
+}
+
+// diagnosticMarker returns the appropriate marker character and color for a diagnostic severity.
+func diagnosticMarker(severity int) (rune, tcell.Color) {
+	switch severity {
+	case 1: // error
+		return ui.Style.ErrorMarker(), tcell.ColorRed
+	case 2: // warning
+		return ui.Style.WarningMarker(), tcell.ColorYellow
+	default: // info/hint
+		return ui.Style.InfoMarker(), tcell.ColorBlue
+	}
+}
+
 // drawGutterForLine draws the gutter (line number, breakpoint, diagnostic) for a given logical line.
 func (e *Editor) drawGutterForLine(screen tcell.Screen, x, y, gutterW, lineIdx int, tab *Tab) {
 	gutterStr := FormatGutterLine(lineIdx+1, tab.Buffer.LineCount())
@@ -1688,15 +1892,7 @@ func (e *Editor) drawGutterForLine(screen tcell.Screen, x, y, gutterW, lineIdx i
 	if tab.FilePath != "" {
 		if diags, ok := e.diagnostics[tab.FilePath]; ok {
 			if diag, ok := diags[lineIdx]; ok {
-				markerCh := '!'
-				markerFg := tcell.ColorYellow
-				if diag.Severity == 1 {
-					markerCh = 'E'
-					markerFg = tcell.ColorRed
-				} else if diag.Severity == 2 {
-					markerCh = 'W'
-					markerFg = tcell.ColorYellow
-				}
+				markerCh, markerFg := diagnosticMarker(diag.Severity)
 				screen.SetContent(x, y, markerCh, nil,
 					tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg).Bold(true))
 				for i, ch := range gutterStr {
@@ -1834,17 +2030,28 @@ func (e *Editor) drawTabBar(screen tcell.Screen, x, y, width int) {
 
 	cx := x + 1
 	for i, tab := range e.tabs {
-		name := tab.Name
-		if tab.Buffer.Modified() {
-			name = "*" + name
-		}
-		label := " " + name + " "
-
 		fg := ui.ColorTabInactive
 		bg := ui.ColorTabBarBg
 		if i == e.activeTab {
 			fg = ui.ColorTabActive
 			bg = ui.ColorTabActiveBg
+		}
+
+		// Build label: [icon] name [modified]
+		var label string
+		if ui.Style.Modern {
+			icon := ui.Style.FileIcon(tab.Name)
+			if tab.Buffer.Modified() {
+				label = " " + icon + " " + tab.Name + " " + ui.Style.ModifiedDot() + " "
+			} else {
+				label = " " + icon + " " + tab.Name + " "
+			}
+		} else {
+			name := tab.Name
+			if tab.Buffer.Modified() {
+				name = "*" + name
+			}
+			label = " " + name + " "
 		}
 
 		for _, ch := range label {
@@ -1855,7 +2062,7 @@ func (e *Editor) drawTabBar(screen tcell.Screen, x, y, width int) {
 		}
 		// Separator
 		if cx < x+width {
-			screen.SetContent(cx, y, '│', nil, tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorTabBarBg))
+			screen.SetContent(cx, y, ui.Style.TabSeparator(), nil, tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorTabBarBg))
 			cx++
 		}
 	}

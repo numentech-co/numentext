@@ -114,6 +114,15 @@ func (m *Manager) NotifyClose(filePath string) {
 	client.DidClose(filePath)
 }
 
+// DocumentSymbols returns document symbols for a file
+func (m *Manager) DocumentSymbols(filePath string) ([]DocumentSymbol, error) {
+	client := m.ClientForFile(filePath)
+	if client == nil {
+		return nil, nil
+	}
+	return client.DocumentSymbols(filePath)
+}
+
 // StopAll shuts down all running language servers
 func (m *Manager) StopAll() {
 	m.mu.Lock()

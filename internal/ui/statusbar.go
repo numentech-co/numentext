@@ -21,6 +21,7 @@ type StatusBar struct {
 	modePending  string
 	commandText  string
 	focusedPanel string // name of currently focused panel
+	wordWrap     bool
 }
 
 func NewStatusBar() *StatusBar {
@@ -60,6 +61,10 @@ func (sb *StatusBar) SetFocusedPanel(name string) {
 	sb.focusedPanel = name
 }
 
+func (sb *StatusBar) SetWordWrap(on bool) {
+	sb.wordWrap = on
+}
+
 func (sb *StatusBar) Draw(screen tcell.Screen) {
 	sb.Box.DrawForSubclass(screen, sb)
 	x, y, width, _ := sb.GetInnerRect()
@@ -93,13 +98,16 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 	if sb.filename != "" {
 		left += " " + sb.filename
 		if sb.modified {
-			left += " [modified]"
+			left += " " + Style.ModifiedIndicator()
 		}
 		left += fmt.Sprintf(" | Ln %d, Col %d", sb.line, sb.col)
 		if sb.language != "" {
 			left += " | " + sb.language
 		}
 		left += " | " + sb.encoding
+		if sb.wordWrap {
+			left += " | " + Style.WrapIndicator()
+		}
 	} else if sb.message != "" {
 		left += " " + sb.message
 	} else if left == "" {

@@ -69,6 +69,11 @@ func New() *App {
 
 	a.workDir, _ = os.Getwd()
 
+	// Initialize UI style and theme from config
+	ui.InitStyle(a.config.UIStyle, a.config.IconSet)
+	ui.ApplyTheme(a.config.Theme)
+	a.applyBorderStyle()
+
 	a.setupUI()
 	a.setupMenus()
 	a.setupKeybindings()
@@ -270,6 +275,56 @@ func (a *App) setupMenus() {
 			}},
 			{Label: "Keyboard: Helix", Action: func() {
 				a.setKeyboardMode("helix")
+				_ = a.config.Save()
+			}},
+			{Label: "UI Style: Modern", Accel: 'm', Action: func() {
+				a.config.UIStyle = "modern"
+				ui.InitStyle(a.config.UIStyle, a.config.IconSet)
+				a.applyBorderStyle()
+				_ = a.config.Save()
+			}},
+			{Label: "UI Style: Classic", Accel: 'c', Action: func() {
+				a.config.UIStyle = "classic"
+				ui.InitStyle(a.config.UIStyle, a.config.IconSet)
+				a.applyBorderStyle()
+				_ = a.config.Save()
+			}},
+			{Label: "Icons: Unicode", Action: func() {
+				a.config.IconSet = "unicode"
+				ui.InitStyle(a.config.UIStyle, a.config.IconSet)
+				a.fileTree.Refresh()
+				_ = a.config.Save()
+			}},
+			{Label: "Icons: ASCII", Action: func() {
+				a.config.IconSet = "ascii"
+				ui.InitStyle(a.config.UIStyle, a.config.IconSet)
+				a.fileTree.Refresh()
+				_ = a.config.Save()
+			}},
+			{Label: "Icons: Nerd Font", Action: func() {
+				a.config.IconSet = "nerd-font"
+				ui.InitStyle(a.config.UIStyle, a.config.IconSet)
+				a.fileTree.Refresh()
+				_ = a.config.Save()
+			}},
+			{Label: "Theme: Borland", Action: func() {
+				a.config.Theme = "borland"
+				ui.ApplyTheme("borland")
+				_ = a.config.Save()
+			}},
+			{Label: "Theme: Modern Dark", Action: func() {
+				a.config.Theme = "modern-dark"
+				ui.ApplyTheme("modern-dark")
+				_ = a.config.Save()
+			}},
+			{Label: "Theme: Modern Light", Action: func() {
+				a.config.Theme = "modern-light"
+				ui.ApplyTheme("modern-light")
+				_ = a.config.Save()
+			}},
+			{Label: "Theme: Solarized Dark", Action: func() {
+				a.config.Theme = "solarized-dark"
+				ui.ApplyTheme("solarized-dark")
 				_ = a.config.Save()
 			}},
 		},
@@ -1241,10 +1296,16 @@ func (a *App) setupLSP() {
 
 	// Wire editor callbacks for LSP notifications
 	a.editor.SetOnFileOpen(func(filePath, text string) {
-		go a.lspManager.NotifyOpen(filePath, text)
+		go func() {
+			a.lspManager.NotifyOpen(filePath, text)
+			a.refreshBreadcrumb(filePath)
+		}()
 	})
 	a.editor.SetOnFileChange(func(filePath, text string) {
-		go a.lspManager.NotifyChange(filePath, text)
+		go func() {
+			a.lspManager.NotifyChange(filePath, text)
+			a.refreshBreadcrumb(filePath)
+		}()
 	})
 	a.editor.SetOnFileClose(func(filePath string) {
 		go a.lspManager.NotifyClose(filePath)
@@ -1673,4 +1734,56 @@ func (a *App) cleanup() {
 			i++
 		}
 	}
+}
+
+// refreshBreadcrumb fetches document symbols from LSP and updates the editor breadcrumb.
+func (a *App) refreshBreadcrumb(filePath string) {
+	symbols, err := a.lspManager.DocumentSymbols(filePath)
+	if err != nil || symbols == nil {
+		return
+	}
+	bs := convertSymbols(symbols)
+	a.tviewApp.QueueUpdateDraw(func() {
+		a.editor.SetBreadcrumbSymbols(filePath, bs)
+	})
+}
+
+func convertSymbols(symbols []lsp.DocumentSymbol) []editor.BreadcrumbSymbol {
+	result := make([]editor.BreadcrumbSymbol, len(symbols))
+	for i, s := range symbols {
+		result[i] = editor.BreadcrumbSymbol{
+			Name:      s.Name,
+			Kind:      s.Kind,
+			StartLine: s.Range.Start.Line,
+			EndLine:   s.Range.End.Line,
+		}
+		if len(s.Children) > 0 {
+			result[i].Children = convertSymbols(s.Children)
+		}
+	}
+	return result
+}
+
+// applyBorderStyle sets tview global border characters based on UI style.
+func (a *App) applyBorderStyle() {
+	if a.config.UIStyle == "classic" {
+		tview.Borders.Horizontal = '-'
+		tview.Borders.Vertical = '|'
+		tview.Borders.TopLeft = '+'
+		tview.Borders.TopRight = '+'
+		tview.Borders.BottomLeft = '+'
+		tview.Borders.BottomRight = '+'
+		tview.Borders.LeftT = '+'
+		tview.Borders.RightT = '+'
+		tview.Borders.TopT = '+'
+		tview.Borders.BottomT = '+'
+		tview.Borders.Cross = '+'
+		tview.Borders.HorizontalFocus = '-'
+		tview.Borders.VerticalFocus = '|'
+		tview.Borders.TopLeftFocus = '+'
+		tview.Borders.TopRightFocus = '+'
+		tview.Borders.BottomLeftFocus = '+'
+		tview.Borders.BottomRightFocus = '+'
+	}
+	// Modern mode uses tview defaults (Unicode box-drawing)
 }

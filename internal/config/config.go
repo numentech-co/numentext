@@ -15,6 +15,8 @@ type Config struct {
 	KeyboardMode string   `json:"keyboard_mode"`
 	FileTreeWidth int     `json:"file_tree_width"`
 	OutputHeight  int     `json:"output_height"`
+	UIStyle       string  `json:"ui_style"`
+	IconSet       string  `json:"icon_set"`
 }
 
 func DefaultConfig() *Config {
@@ -27,6 +29,8 @@ func DefaultConfig() *Config {
 		KeyboardMode:  "default",
 		FileTreeWidth: 20,
 		OutputHeight:  8,
+		UIStyle:       "modern",
+		IconSet:       "unicode",
 	}
 }
 
@@ -45,19 +49,27 @@ func Load() *Config {
 	if err != nil {
 		return cfg
 	}
-	json.Unmarshal(data, cfg)
+	_ = json.Unmarshal(data, cfg)
 	if cfg.FileTreeWidth == 0 {
 		cfg.FileTreeWidth = 20
 	}
 	if cfg.OutputHeight == 0 {
 		cfg.OutputHeight = 8
 	}
+	if cfg.UIStyle == "" {
+		cfg.UIStyle = "modern"
+	}
+	if cfg.IconSet == "" {
+		cfg.IconSet = "unicode"
+	}
 	return cfg
 }
 
 func (c *Config) Save() error {
 	dir := ConfigDir()
-	os.MkdirAll(dir, 0755)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err

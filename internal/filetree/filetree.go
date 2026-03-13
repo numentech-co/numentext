@@ -82,7 +82,12 @@ func (ft *FileTree) SetRootPath(path string) {
 }
 
 func (ft *FileTree) createNode(path, name string, isDir bool) *tview.TreeNode {
-	icon := ft.fileIcon(name, isDir)
+	var icon string
+	if isDir {
+		icon = ui.Style.DirIconClosed()
+	} else {
+		icon = ui.Style.FileIcon(name)
+	}
 	node := tview.NewTreeNode(icon + " " + name)
 	node.SetReference(path)
 	node.SetSelectable(true)
@@ -121,44 +126,6 @@ func (ft *FileTree) addChildren(parent *tview.TreeNode, path string) {
 	}
 }
 
-func (ft *FileTree) fileIcon(name string, isDir bool) string {
-	if isDir {
-		return "+"
-	}
-	ext := strings.ToLower(filepath.Ext(name))
-	switch ext {
-	case ".go":
-		return "g"
-	case ".c", ".h":
-		return "c"
-	case ".cpp", ".cc", ".cxx", ".hpp":
-		return "c"
-	case ".py":
-		return "p"
-	case ".rs":
-		return "r"
-	case ".js", ".jsx":
-		return "j"
-	case ".ts", ".tsx":
-		return "t"
-	case ".java":
-		return "j"
-	case ".json":
-		return "~"
-	case ".md":
-		return "m"
-	case ".html", ".htm":
-		return "h"
-	case ".css":
-		return "#"
-	case ".sh", ".bash":
-		return "$"
-	case ".yaml", ".yml":
-		return "y"
-	default:
-		return "-"
-	}
-}
 
 // Refresh reloads the file tree
 func (ft *FileTree) Refresh() {

@@ -186,9 +186,50 @@ func (mb *MenuBar) drawDropdown(screen tcell.Screen, startX, startY int) {
 	}
 	maxWidth += 4 // padding
 
+	itemCount := len(menu.Items)
+
+	// Modern mode: draw border around dropdown
+	if Style.Modern {
+		borderStyle := tcell.StyleDefault.Foreground(ColorMenuDropText).Background(ColorMenuDropBg)
+		// Top border
+		screen.SetContent(dropX-1, dropY-1, '\u250c', nil, borderStyle) // ┌
+		for cx := dropX; cx < dropX+maxWidth; cx++ {
+			screen.SetContent(cx, dropY-1, '\u2500', nil, borderStyle) // ─
+		}
+		screen.SetContent(dropX+maxWidth, dropY-1, '\u2510', nil, borderStyle) // ┐
+		// Side borders
+		for i := 0; i < itemCount; i++ {
+			screen.SetContent(dropX-1, dropY+i, '\u2502', nil, borderStyle)    // │
+			screen.SetContent(dropX+maxWidth, dropY+i, '\u2502', nil, borderStyle) // │
+		}
+		// Bottom border
+		screen.SetContent(dropX-1, dropY+itemCount, '\u2514', nil, borderStyle)    // └
+		for cx := dropX; cx < dropX+maxWidth; cx++ {
+			screen.SetContent(cx, dropY+itemCount, '\u2500', nil, borderStyle) // ─
+		}
+		screen.SetContent(dropX+maxWidth, dropY+itemCount, '\u2518', nil, borderStyle) // ┘
+
+		// Shadow
+		DrawShadow(screen, dropX-1, dropY-1, maxWidth+2, itemCount+2)
+	}
+
 	// Draw dropdown items
 	for i, item := range menu.Items {
 		iy := dropY + i
+
+		// Check for separator
+		if item.Label == "---" {
+			sepStyle := tcell.StyleDefault.Foreground(ColorMenuShortcut).Background(ColorMenuDropBg)
+			sepCh := Style.MenuSeparator()
+			if Style.Modern {
+				screen.SetContent(dropX-1, iy, '\u251c', nil, sepStyle) // ├
+				screen.SetContent(dropX+maxWidth, iy, '\u2524', nil, sepStyle) // ┤
+			}
+			for cx := dropX; cx < dropX+maxWidth; cx++ {
+				screen.SetContent(cx, iy, sepCh, nil, sepStyle)
+			}
+			continue
+		}
 
 		style := tcell.StyleDefault.Foreground(ColorMenuDropText).Background(ColorMenuDropBg)
 		shortcutStyle := tcell.StyleDefault.Foreground(ColorMenuShortcut).Background(ColorMenuDropBg)
@@ -400,5 +441,10 @@ func (mb *MenuBar) GetDropdownRect() (int, int, int, int) {
 	}
 	maxWidth += 4
 
-	return dropX, dropY, maxWidth, len(menu.Items)
+	h := len(menu.Items)
+	if Style.Modern {
+		// Account for border + shadow
+		return dropX - 1, dropY - 1, maxWidth + 3, h + 3
+	}
+	return dropX, dropY, maxWidth, h
 }

@@ -207,3 +207,49 @@ const (
 	DiagnosticSeverityInformation = 3
 	DiagnosticSeverityHint        = 4
 )
+
+// --- Document Symbols ---
+
+type DocumentSymbolParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+// DocumentSymbol represents a symbol in a document (hierarchical).
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           int              `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+// SymbolInformation is the flat representation (older servers).
+type SymbolInformation struct {
+	Name     string   `json:"name"`
+	Kind     int      `json:"kind"`
+	Location Location `json:"location"`
+}
+
+// SymbolKind constants
+const (
+	SymbolKindFile          = 1
+	SymbolKindModule        = 2
+	SymbolKindNamespace     = 3
+	SymbolKindPackage       = 4
+	SymbolKindClass         = 5
+	SymbolKindMethod        = 6
+	SymbolKindProperty      = 7
+	SymbolKindField         = 8
+	SymbolKindConstructor   = 9
+	SymbolKindEnum          = 10
+	SymbolKindInterface     = 11
+	SymbolKindFunction      = 12
+	SymbolKindVariable      = 13
+	SymbolKindConstant      = 14
+	SymbolKindString        = 15
+	SymbolKindNumber        = 16
+	SymbolKindBoolean       = 17
+	SymbolKindArray         = 18
+	SymbolKindStruct        = 23
+)

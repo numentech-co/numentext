@@ -224,6 +224,39 @@ func (c *Client) Definition(filePath string, line, col int) ([]Location, error) 
 	return locs, nil
 }
 
+// DocumentSymbols requests document symbols for a file
+func (c *Client) DocumentSymbols(filePath string) ([]DocumentSymbol, error) {
+	uri := pathToURI(filePath)
+	resp, err := c.call("textDocument/documentSymbol", DocumentSymbolParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Result == nil {
+		return nil, nil
+	}
+
+	// Response can be []DocumentSymbol (hierarchical) or []SymbolInformation (flat)
+	var symbols []DocumentSymbol
+	if err := remarshal(resp.Result, &symbols); err != nil {
+		// Try flat SymbolInformation format and convert
+		var flat []SymbolInformation
+		if err2 := remarshal(resp.Result, &flat); err2 != nil {
+			return nil, fmt.Errorf("decode document symbols: %w", err)
+		}
+		for _, si := range flat {
+			symbols = append(symbols, DocumentSymbol{
+				Name:           si.Name,
+				Kind:           si.Kind,
+				Range:          si.Location.Range,
+				SelectionRange: si.Location.Range,
+			})
+		}
+	}
+	return symbols, nil
+}
+
 // Shutdown sends a shutdown request
 func (c *Client) Shutdown() error {
 	_, err := c.call("shutdown", nil)

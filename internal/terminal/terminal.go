@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"io"
 	"os"
 	"os/exec"
 	"sync"
@@ -91,9 +90,6 @@ func (t *Terminal) readLoop() {
 			}
 		}
 		if err != nil {
-			if err != io.EOF {
-				// PTY closed
-			}
 			return
 		}
 	}
@@ -105,9 +101,48 @@ func (t *Terminal) WriteInput(data []byte) {
 	ptmx := t.ptmx
 	bt := t.vt.Blocks()
 
-	// Heuristic: on Enter, if no OSC 133 is in use, create a block from the current line
-	if len(data) == 1 && data[0] == '\r' && !bt.HasOSC133() {
-		bt.HeuristicEnter()
+	if !bt.HasOSC133() {
+		// When a command is active (running), release control — don't track
+		// user input or create blocks. Only detect shell prompt return on Enter.
+		commandActive := bt.ActiveBlock() != nil && !bt.ActiveBlock().Finished
+
+		if commandActive {
+			// Only check Enter for shell prompt detection (command finished?)
+			if len(data) == 1 && data[0] == '\r' {
+				t.vt.snapshotActiveBlock()
+				bt.HeuristicEnter()
+			}
+		} else {
+			// At shell prompt — track user input for command detection
+			if len(data) == 1 {
+				switch data[0] {
+				case '\r': // Enter
+					t.vt.snapshotActiveBlock()
+					prevCount := bt.BlockCount()
+					bt.HeuristicEnter()
+					// If a new block was created, clear VT so previous
+					// command output doesn't bleed into the new display
+					if bt.BlockCount() > prevCount {
+						t.vt.ClearGrid()
+					}
+				case 0x7f, 0x08: // Backspace / BS
+					bt.BackspaceUserInput()
+				case 0x15: // Ctrl+U (kill line)
+					bt.ClearUserInput()
+				default:
+					if data[0] >= 0x20 && data[0] < 0x7f {
+						bt.FeedUserInput(rune(data[0]))
+					}
+				}
+			} else if len(data) > 0 && data[0] != 0x1b {
+				// Multi-byte UTF-8 character
+				for _, r := range string(data) {
+					if r >= 0x20 {
+						bt.FeedUserInput(r)
+					}
+				}
+			}
+		}
 	}
 	t.mu.Unlock()
 

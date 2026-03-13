@@ -8,7 +8,6 @@ import (
 type ViMode struct {
 	subMode    SubMode
 	pendingOp  rune   // Pending operator: d, c, y
-	count      int    // Numeric count prefix
 	countBuf   string // Accumulating count digits
 	commandBuf string // : command buffer
 	Callbacks  *ViCommandCallback
