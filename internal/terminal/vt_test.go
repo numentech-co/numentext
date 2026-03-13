@@ -155,8 +155,8 @@ func TestSGRColors(t *testing.T) {
 	vt := NewVT(80, 24)
 	vt.Write([]byte("\x1b[31mR\x1b[32mG\x1b[0mN"))
 	cell := vt.Cell(0, 0)
-	if cell.Ch != 'R' || cell.Fg != tcell.ColorRed {
-		t.Errorf("cell[0][0] = %c fg=%v, want 'R' Red", cell.Ch, cell.Fg)
+	if cell.Ch != 'R' || cell.Fg != tcell.ColorMaroon {
+		t.Errorf("cell[0][0] = %c fg=%v, want 'R' Maroon", cell.Ch, cell.Fg)
 	}
 	cell = vt.Cell(0, 1)
 	if cell.Ch != 'G' || cell.Fg != tcell.ColorGreen {

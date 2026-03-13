@@ -231,15 +231,10 @@ func (bt *BlockTracker) HeuristicEnter() {
 		bt.userInput = ""
 		return
 	}
-	// If there's an active unfinished block, check whether the shell prompt
-	// has returned (meaning the previous command finished). If not, the Enter
-	// keypress is going to the running program (e.g. Claude Code) — don't
-	// create a new block.
+	// If there's an active unfinished block, finish it — the user pressing
+	// Enter means a new command is being submitted. If OSC 133 were available,
+	// it would handle block boundaries; heuristic mode relies on Enter presses.
 	if bt.active != nil && !bt.active.Finished {
-		if !bt.isAtShellPrompt() {
-			bt.userInput = ""
-			return
-		}
 		bt.active.Finished = true
 	}
 	bt.active = &CommandBlock{
