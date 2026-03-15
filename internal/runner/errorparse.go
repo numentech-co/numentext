@@ -36,9 +36,9 @@ var errorPatterns = []errorPattern{
 		severity: 4,
 		message:  5,
 	},
-	// Go: ./main.go:42:10: undefined: foo
+	// Go: ./main.go:42:10: undefined: foo  (handles ./relative, /absolute, and bare paths)
 	{
-		re:       regexp.MustCompile(`^\.?/?([^\s:]+\.go):(\d+):(\d+):\s+(.+)$`),
+		re:       regexp.MustCompile(`^([^\s:]+\.go):(\d+):(\d+):\s+(.+)$`),
 		file:     1,
 		line:     2,
 		col:      3,

@@ -47,8 +47,8 @@ func TestParseGoErrors(t *testing.T) {
 	}
 
 	e := errors[0]
-	if e.File != "main.go" {
-		t.Errorf("file: got %q, want %q", e.File, "main.go")
+	if e.File != "./main.go" {
+		t.Errorf("file: got %q, want %q", e.File, "./main.go")
 	}
 	if e.Line != 42 {
 		t.Errorf("line: got %d, want 42", e.Line)

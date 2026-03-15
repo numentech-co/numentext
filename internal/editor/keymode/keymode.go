@@ -77,8 +77,6 @@ func MapKey(ev *tcell.EventKey) Action {
 	shift := mod&tcell.ModShift != 0
 	ctrl := mod&tcell.ModCtrl != 0
 
-	alt := mod&tcell.ModAlt != 0
-
 	switch key {
 	case tcell.KeyLeft:
 		if ctrl && shift {
@@ -150,9 +148,6 @@ func MapKey(ev *tcell.EventKey) Action {
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		return ActionBackspace
 	case tcell.KeyRune:
-		if alt && ev.Rune() == ']' {
-			return ActionMatchBracket
-		}
 		if ctrl {
 			switch ev.Rune() {
 			case 'a':

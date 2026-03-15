@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -60,8 +61,9 @@ type App struct {
 	dragStartH  int // output height at drag start
 
 	// Build error navigation
-	buildErrors    []runner.BuildError
-	buildErrorIdx  int // current error index (0-based), -1 if none
+	buildErrors      []runner.BuildError
+	buildErrorIdx    int  // current error index (0-based), -1 if none
+	navigatingErrors bool // true while jumping to an error (suppresses clear)
 }
 
 func New() *App {
@@ -108,8 +110,8 @@ func (a *App) setupUI() {
 	// Wire callbacks
 	a.editor.SetOnChange(func() {
 		a.updateStatusBar()
-		// Clear build error markers when user edits a file
-		if len(a.buildErrors) > 0 {
+		// Clear build error markers when user edits a file (not during error navigation)
+		if len(a.buildErrors) > 0 && !a.navigatingErrors {
 			a.clearBuildErrors()
 		}
 	})
@@ -499,6 +501,70 @@ func (a *App) setupKeybindings() {
 			}
 		}
 
+		// Ctrl+letter handling. Terminals send these in various ways:
+		// as KeyCtrl* constants, as KeyRune with ModCtrl, or as raw
+		// key codes with ModCtrl. Normalize by checking ctrl flag + rune.
+		ctrlRune := rune(0)
+		if ctrl {
+			ctrlRune = event.Rune()
+		}
+		// Some terminals send Ctrl+letter as KeyCtrl* (key 1-26) with rune 0.
+		// Map those back to the corresponding letter.
+		if ctrlRune == 0 && key >= 1 && key <= 26 {
+			ctrlRune = rune('a' + key - 1)
+			ctrl = true
+		}
+		if ctrl && ctrlRune != 0 {
+			switch ctrlRune {
+			case 's':
+				if shift {
+					a.saveFileAs()
+				} else {
+					a.saveFile()
+				}
+				return nil
+			case 'n':
+				a.newFile()
+				return nil
+			case 'o':
+				a.openFile()
+				return nil
+			case 'q':
+				a.quit()
+				return nil
+			case 'w':
+				if a.focusedPanel == "terminal" {
+					a.closeActiveTerminal()
+				} else {
+					a.closeTab()
+				}
+				return nil
+			case 'f':
+				if shift {
+					a.showSearchPalette()
+				} else {
+					a.showFind()
+				}
+				return nil
+			case 'g':
+				a.showGoToLine()
+				return nil
+			case 'h':
+				a.showReplace()
+				return nil
+			case 'b':
+				a.editor.HandleAction(editor.ActionMatchBracket, 0)
+				return nil
+			case 'e':
+				if shift {
+					a.prevBuildError()
+				} else {
+					a.nextBuildError()
+				}
+				return nil
+			}
+		}
+
 		switch key {
 		case tcell.KeyEscape:
 			if a.menuBar.IsOpen() {
@@ -557,19 +623,6 @@ func (a *App) setupKeybindings() {
 				case '`':
 					a.toggleTerminal()
 					return nil
-				case 'n':
-					a.newFile()
-					return nil
-				case 'o':
-					a.openFile()
-					return nil
-				case 's':
-					if mod&tcell.ModShift != 0 {
-						a.saveFileAs()
-					} else {
-						a.saveFile()
-					}
-					return nil
 				case 'm':
 					if mod&tcell.ModShift != 0 {
 						a.cycleKeyboardMode()
@@ -587,29 +640,6 @@ func (a *App) setupKeybindings() {
 						a.createTerminal()
 						return nil
 					}
-				case 'w':
-					if a.focusedPanel == "terminal" {
-						a.closeActiveTerminal()
-					} else {
-						a.closeTab()
-					}
-					return nil
-				case 'q':
-					a.quit()
-					return nil
-				case 'f':
-					if mod&tcell.ModShift != 0 {
-						a.showSearchPalette()
-					} else {
-						a.showFind()
-					}
-					return nil
-				case 'h':
-					a.showReplace()
-					return nil
-				case 'g':
-					a.showGoToLine()
-					return nil
 				case 'i':
 					if mod&tcell.ModShift != 0 {
 						a.formatFile()
@@ -847,8 +877,11 @@ func (a *App) updateStatusBar() {
 	tab := a.editor.ActiveTab()
 	if tab != nil {
 		a.statusBar.Update(tab.Name, tab.CursorRow, tab.CursorCol, tab.Highlighter.Language(), tab.Buffer.Modified())
-		// Show diagnostic message if cursor is on a diagnostic line
-		if diag, ok := a.editor.DiagnosticAtLine(tab.CursorRow); ok {
+		// Show build error info if navigating errors, otherwise show diagnostic
+		if len(a.buildErrors) > 0 && a.buildErrorIdx >= 0 && a.buildErrorIdx < len(a.buildErrors) {
+			be := a.buildErrors[a.buildErrorIdx]
+			a.statusBar.SetMessage(fmt.Sprintf("Error %d of %d: %s", a.buildErrorIdx+1, len(a.buildErrors), be.Message))
+		} else if diag, ok := a.editor.DiagnosticAtLine(tab.CursorRow); ok {
 			a.statusBar.SetMessage(diag.Message)
 		}
 	} else {
@@ -941,6 +974,19 @@ func (a *App) buildPaletteCommands() []ui.PaletteCommand {
 	return commands
 }
 
+// OpenFileByPath opens a file by path (used for CLI arguments).
+func (a *App) OpenFileByPath(filePath string) {
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		absPath = filePath
+	}
+	if err := a.editor.OpenFile(absPath); err != nil {
+		a.output.AppendError("Error opening " + filePath + ": " + err.Error())
+	} else {
+		a.config.AddRecentFile(absPath)
+	}
+}
+
 // Actions
 func (a *App) newFile() {
 	a.editor.NewTab("untitled", "", "")
@@ -993,14 +1039,14 @@ func (a *App) saveFile() {
 
 		result := editor.RunFormatters(tab.FilePath, toolsCfg.Formatters)
 		if result.Error != nil {
-			a.statusBar.SetMessage("Format error: " + result.Error.Error())
+			a.statusBar.SetMessage("Saved (format skipped: syntax errors)")
 			// File was already saved with original content (rollback happened in RunFormatters)
 		} else if result.Changed {
 			// Reload buffer from disk
 			a.editor.ReloadCurrentFile()
 			// Restore cursor as closely as possible
 			a.editor.SetCursorPos(cursorRow, cursorCol)
-			a.statusBar.SetMessage("File saved and formatted: " + tab.FilePath)
+			a.statusBar.SetMessage("Saved and formatted: " + tab.FilePath)
 		} else {
 			a.statusBar.SetMessage("File saved: " + tab.FilePath)
 		}
@@ -1024,6 +1070,9 @@ func (a *App) saveFile() {
 			})
 		}()
 	}
+
+	// Refresh file tree in case a new file was saved
+	a.fileTree.Refresh()
 }
 
 func (a *App) saveFileAs() {
@@ -1045,6 +1094,7 @@ func (a *App) saveFileAs() {
 				a.config.AddRecentFile(result.FilePath)
 				_ = a.config.Save()
 				a.statusBar.SetMessage("File saved: " + result.FilePath)
+				a.fileTree.Refresh()
 			}
 		}
 		a.tviewApp.SetFocus(a.editor)
@@ -1446,6 +1496,7 @@ func (a *App) handleBuildErrors(result *runner.Result) {
 
 	a.buildErrors = errors
 	a.buildErrorIdx = 0
+	a.statusBar.SetHasErrors(true)
 
 	// Set build diagnostic markers in the editor for each file
 	fileErrors := make(map[string]map[int]editor.DiagnosticInfo)
@@ -1483,6 +1534,7 @@ func (a *App) handleBuildErrors(result *runner.Result) {
 func (a *App) clearBuildErrors() {
 	a.buildErrors = nil
 	a.buildErrorIdx = -1
+	a.statusBar.SetHasErrors(false)
 	a.editor.ClearAllBuildDiagnostics()
 }
 
@@ -1493,6 +1545,10 @@ func (a *App) jumpToBuildError(idx int) {
 	}
 	be := a.buildErrors[idx]
 	a.buildErrorIdx = idx
+
+	// Suppress clearing errors during navigation
+	a.navigatingErrors = true
+	defer func() { a.navigatingErrors = false }()
 
 	// Resolve file path relative to working directory
 	filePath := be.File
@@ -1662,10 +1718,11 @@ func (a *App) showShortcuts() {
  Ctrl+F    Find
  Ctrl+H    Replace
  Ctrl+G    Go to line
+ Ctrl+B    Go to matching bracket
 
  [white::b]Run[-::-]
- F4        Next error
- Shift+F4  Previous error
+ Ctrl+E    Next build error
+ Ctrl+Shift+E  Previous build error
  F5        Run
  F9        Build
  F10       Menu bar

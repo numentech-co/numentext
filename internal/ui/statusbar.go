@@ -22,6 +22,7 @@ type StatusBar struct {
 	commandText  string
 	focusedPanel string // name of currently focused panel
 	wordWrap     bool
+	hasErrors    bool
 }
 
 func NewStatusBar() *StatusBar {
@@ -63,6 +64,10 @@ func (sb *StatusBar) SetFocusedPanel(name string) {
 
 func (sb *StatusBar) SetWordWrap(on bool) {
 	sb.wordWrap = on
+}
+
+func (sb *StatusBar) SetHasErrors(has bool) {
+	sb.hasErrors = has
 }
 
 func (sb *StatusBar) Draw(screen tcell.Screen) {
@@ -119,9 +124,13 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 			screen.SetContent(x+i, y, ch, nil, style)
 		}
 	}
+	leftEnd := x + len(left)
 
 	// Right side: panel indicator + shortcut hints
-	right := "F4:Err  F5:Run  F9:Build  F10:Menu "
+	right := "F5:Run  F9:Build  F10:Menu "
+	if sb.hasErrors {
+		right = "^E:Err  " + right
+	}
 	if sb.focusedPanel != "" {
 		right = "[" + sb.focusedPanel + "]  " + right
 	}
@@ -129,6 +138,21 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 	for i, ch := range right {
 		if rightStart+i >= x && rightStart+i < x+width {
 			screen.SetContent(rightStart+i, y, ch, nil, style)
+		}
+	}
+
+	// Middle: message (between file info and shortcuts)
+	if sb.message != "" && sb.filename != "" {
+		msgStyle := tcell.StyleDefault.Foreground(tcell.ColorWhite).Background(ColorStatusBg).Bold(true)
+		msg := " | " + sb.message
+		for i, ch := range msg {
+			pos := leftEnd + i
+			if pos >= rightStart-1 {
+				break // don't overlap right side
+			}
+			if pos < x+width {
+				screen.SetContent(pos, y, ch, nil, msgStyle)
+			}
 		}
 	}
 }

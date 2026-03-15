@@ -36,7 +36,7 @@ type Config struct {
 	OutputHeight  int                           `json:"output_height"`
 	UIStyle       string                        `json:"ui_style"`
 	IconSet       string                        `json:"icon_set"`
-	LanguageTools map[string]LanguageToolConfig  `json:"language_tools,omitempty"`
+	LanguageTools map[string]LanguageToolConfig  `json:"language_tools"`
 }
 
 func DefaultConfig() *Config {
