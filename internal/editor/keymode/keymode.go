@@ -66,6 +66,7 @@ const (
 	ActionEnterCommandMode    // Vi : — enter command line mode
 	ActionSelectLine          // Helix x — select current line
 	ActionExtendLineSelect    // Helix X — extend selection by line
+	ActionMatchBracket        // Jump to matching bracket
 )
 
 // MapKey maps a tcell key event to an editor action (standard non-modal mapping)
@@ -75,6 +76,8 @@ func MapKey(ev *tcell.EventKey) Action {
 
 	shift := mod&tcell.ModShift != 0
 	ctrl := mod&tcell.ModCtrl != 0
+
+	alt := mod&tcell.ModAlt != 0
 
 	switch key {
 	case tcell.KeyLeft:
@@ -147,6 +150,9 @@ func MapKey(ev *tcell.EventKey) Action {
 	case tcell.KeyBackspace, tcell.KeyBackspace2:
 		return ActionBackspace
 	case tcell.KeyRune:
+		if alt && ev.Rune() == ']' {
+			return ActionMatchBracket
+		}
 		if ctrl {
 			switch ev.Rune() {
 			case 'a':
