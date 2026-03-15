@@ -231,6 +231,24 @@ type SymbolInformation struct {
 	Location Location `json:"location"`
 }
 
+// --- Formatting ---
+
+type DocumentFormattingParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Options      FormattingOptions      `json:"options"`
+}
+
+type FormattingOptions struct {
+	TabSize      int  `json:"tabSize"`
+	InsertSpaces bool `json:"insertSpaces"`
+}
+
+// TextEdit represents a change to a text document.
+type TextEdit struct {
+	Range   Range  `json:"range"`
+	NewText string `json:"newText"`
+}
+
 // SymbolKind constants
 const (
 	SymbolKindFile          = 1

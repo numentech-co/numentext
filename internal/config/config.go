@@ -2,21 +2,41 @@ package config
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 )
 
+// ToolDef defines an external tool (formatter or linter) command.
+type ToolDef struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+	// ErrorPattern is an optional regex for parsing linter output.
+	// It should have named groups: file, line, col (optional), message.
+	// Default pattern: file:line:col: message
+	ErrorPattern string `json:"error_pattern,omitempty"`
+}
+
+// LanguageToolConfig holds formatter/linter settings for a single language.
+type LanguageToolConfig struct {
+	Formatters   []ToolDef `json:"formatters,omitempty"`
+	Linters      []ToolDef `json:"linters,omitempty"`
+	FormatOnSave bool      `json:"format_on_save"`
+	LintOnSave   bool      `json:"lint_on_save"`
+}
+
 type Config struct {
-	RecentFiles  []string `json:"recent_files"`
-	TabSize      int      `json:"tab_size"`
-	Theme        string   `json:"theme"`
-	ShowLineNum  bool     `json:"show_line_numbers"`
-	WordWrap     bool     `json:"word_wrap"`
-	KeyboardMode string   `json:"keyboard_mode"`
-	FileTreeWidth int     `json:"file_tree_width"`
-	OutputHeight  int     `json:"output_height"`
-	UIStyle       string  `json:"ui_style"`
-	IconSet       string  `json:"icon_set"`
+	RecentFiles   []string                      `json:"recent_files"`
+	TabSize       int                           `json:"tab_size"`
+	Theme         string                        `json:"theme"`
+	ShowLineNum   bool                          `json:"show_line_numbers"`
+	WordWrap      bool                          `json:"word_wrap"`
+	KeyboardMode  string                        `json:"keyboard_mode"`
+	FileTreeWidth int                           `json:"file_tree_width"`
+	OutputHeight  int                           `json:"output_height"`
+	UIStyle       string                        `json:"ui_style"`
+	IconSet       string                        `json:"icon_set"`
+	LanguageTools map[string]LanguageToolConfig  `json:"language_tools,omitempty"`
 }
 
 func DefaultConfig() *Config {
@@ -31,6 +51,7 @@ func DefaultConfig() *Config {
 		OutputHeight:  8,
 		UIStyle:       "modern",
 		IconSet:       "unicode",
+		LanguageTools: make(map[string]LanguageToolConfig),
 	}
 }
 
@@ -62,7 +83,41 @@ func Load() *Config {
 	if cfg.IconSet == "" {
 		cfg.IconSet = "unicode"
 	}
+	if cfg.LanguageTools == nil {
+		cfg.LanguageTools = make(map[string]LanguageToolConfig)
+	}
+	// Validate tool entries: skip any with empty Command
+	for lang, ltc := range cfg.LanguageTools {
+		validFmt := make([]ToolDef, 0, len(ltc.Formatters))
+		for _, f := range ltc.Formatters {
+			if f.Command == "" {
+				log.Printf("config: skipping formatter with empty command for language %q", lang)
+				continue
+			}
+			validFmt = append(validFmt, f)
+		}
+		validLint := make([]ToolDef, 0, len(ltc.Linters))
+		for _, l := range ltc.Linters {
+			if l.Command == "" {
+				log.Printf("config: skipping linter with empty command for language %q", lang)
+				continue
+			}
+			validLint = append(validLint, l)
+		}
+		ltc.Formatters = validFmt
+		ltc.Linters = validLint
+		cfg.LanguageTools[lang] = ltc
+	}
 	return cfg
+}
+
+// ToolsForLanguage returns the tool config for a language ID (e.g. "go", "python").
+// Returns an empty config if none is configured.
+func (c *Config) ToolsForLanguage(langID string) LanguageToolConfig {
+	if c.LanguageTools == nil {
+		return LanguageToolConfig{}
+	}
+	return c.LanguageTools[langID]
 }
 
 func (c *Config) Save() error {

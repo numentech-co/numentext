@@ -552,6 +552,47 @@ func (e *Editor) SaveAs(filePath string) error {
 	return e.SaveCurrentFile()
 }
 
+// ReloadCurrentFile re-reads the active tab's file from disk into the buffer.
+func (e *Editor) ReloadCurrentFile() error {
+	tab := e.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return fmt.Errorf("no file path")
+	}
+	data, err := os.ReadFile(tab.FilePath)
+	if err != nil {
+		return err
+	}
+	tab.Buffer.SetText(string(data))
+	tab.Buffer.SetModified(false)
+	e.hlVersion++
+	e.notifyChange()
+	return nil
+}
+
+// SetCursorPos sets the cursor position for the active tab, clamped to valid range.
+func (e *Editor) SetCursorPos(row, col int) {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return
+	}
+	lineCount := tab.Buffer.LineCount()
+	if row >= lineCount {
+		row = lineCount - 1
+	}
+	if row < 0 {
+		row = 0
+	}
+	tab.CursorRow = row
+	lineLen := len(tab.Buffer.Line(row))
+	if col > lineLen {
+		col = lineLen
+	}
+	if col < 0 {
+		col = 0
+	}
+	tab.CursorCol = col
+}
+
 func (e *Editor) CloseTab(idx int) {
 	if idx < 0 || idx >= len(e.tabs) {
 		return

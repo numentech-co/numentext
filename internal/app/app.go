@@ -240,8 +240,10 @@ func (a *App) setupMenus() {
 		Accel: 't',
 		Items: []*ui.MenuItem{
 			{Label: "Terminal", Shortcut: "Ctrl+`", Action: a.toggleTerminal},
+			{Label: "Format File", Shortcut: "Ctrl+Shift+I", Accel: 'o', Action: a.formatFile},
+			{Label: "Lint File", Shortcut: "Ctrl+Shift+L", Action: a.lintFile},
 			{Label: "Toggle Block Mode", Accel: 'b', Action: a.toggleBlockMode},
-			{Label: "Restart LSP", Accel: 'l', Action: a.restartLSP},
+			{Label: "Restart LSP", Action: a.restartLSP},
 			{Label: "Clear Output", Action: func() {
 				a.output.Clear()
 			}},
@@ -327,6 +329,7 @@ func (a *App) setupMenus() {
 				ui.ApplyTheme("solarized-dark")
 				_ = a.config.Save()
 			}},
+			{Label: "Formatters/Linters", Accel: 'r', Action: a.showToolsConfig},
 		},
 	}
 
@@ -586,6 +589,16 @@ func (a *App) setupKeybindings() {
 				case 'g':
 					a.showGoToLine()
 					return nil
+				case 'i':
+					if mod&tcell.ModShift != 0 {
+						a.formatFile()
+						return nil
+					}
+				case 'l':
+					if mod&tcell.ModShift != 0 {
+						a.lintFile()
+						return nil
+					}
 				}
 			}
 
@@ -939,11 +952,56 @@ func (a *App) saveFile() {
 		a.saveFileAs()
 		return
 	}
-	err := a.editor.SaveCurrentFile()
-	if err != nil {
-		a.output.AppendError("Error saving: " + err.Error())
+
+	// Determine language tools config
+	langID := lsp.LanguageIDForFile(tab.FilePath)
+	toolsCfg := a.config.ToolsForLanguage(langID)
+
+	// Format on save: run external formatters before writing
+	if toolsCfg.FormatOnSave && len(toolsCfg.Formatters) > 0 {
+		// Save to disk first so formatters can operate on the file
+		err := a.editor.SaveCurrentFile()
+		if err != nil {
+			a.output.AppendError("Error saving: " + err.Error())
+			return
+		}
+
+		// Remember cursor position
+		cursorRow := tab.CursorRow
+		cursorCol := tab.CursorCol
+
+		result := editor.RunFormatters(tab.FilePath, toolsCfg.Formatters)
+		if result.Error != nil {
+			a.statusBar.SetMessage("Format error: " + result.Error.Error())
+			// File was already saved with original content (rollback happened in RunFormatters)
+		} else if result.Changed {
+			// Reload buffer from disk
+			a.editor.ReloadCurrentFile()
+			// Restore cursor as closely as possible
+			a.editor.SetCursorPos(cursorRow, cursorCol)
+			a.statusBar.SetMessage("File saved and formatted: " + tab.FilePath)
+		} else {
+			a.statusBar.SetMessage("File saved: " + tab.FilePath)
+		}
 	} else {
+		err := a.editor.SaveCurrentFile()
+		if err != nil {
+			a.output.AppendError("Error saving: " + err.Error())
+			return
+		}
 		a.statusBar.SetMessage("File saved: " + tab.FilePath)
+	}
+
+	// Lint on save: run linters asynchronously after save
+	if toolsCfg.LintOnSave && len(toolsCfg.Linters) > 0 {
+		filePath := tab.FilePath
+		linters := toolsCfg.Linters
+		go func() {
+			result := editor.RunLinters(filePath, linters)
+			a.tviewApp.QueueUpdateDraw(func() {
+				a.applyLintDiagnostics(filePath, result)
+			})
+		}()
 	}
 }
 
@@ -971,6 +1029,183 @@ func (a *App) saveFileAs() {
 		a.tviewApp.SetFocus(a.editor)
 	})
 	a.layout.ShowDialog("saveas", dialog)
+}
+
+// formatFile runs formatters on the current file (on-demand).
+// Falls back to LSP textDocument/formatting if no external formatters configured.
+func (a *App) formatFile() {
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return
+	}
+	langID := lsp.LanguageIDForFile(tab.FilePath)
+	toolsCfg := a.config.ToolsForLanguage(langID)
+
+	if len(toolsCfg.Formatters) > 0 {
+		// Save first so formatters can work on the file
+		if err := a.editor.SaveCurrentFile(); err != nil {
+			a.output.AppendError("Error saving before format: " + err.Error())
+			return
+		}
+		cursorRow := tab.CursorRow
+		cursorCol := tab.CursorCol
+
+		result := editor.RunFormatters(tab.FilePath, toolsCfg.Formatters)
+		if result.Error != nil {
+			a.statusBar.SetMessage("Format error: " + result.Error.Error())
+		} else if result.Changed {
+			a.editor.ReloadCurrentFile()
+			a.editor.SetCursorPos(cursorRow, cursorCol)
+			a.statusBar.SetMessage("File formatted")
+		} else {
+			a.statusBar.SetMessage("File already formatted")
+		}
+		return
+	}
+
+	// Fallback: try LSP formatting
+	client := a.lspManager.ClientForFile(tab.FilePath)
+	if client != nil {
+		go func() {
+			edits, err := client.Format(tab.FilePath, a.config.TabSize, true)
+			a.tviewApp.QueueUpdateDraw(func() {
+				if err != nil {
+					a.statusBar.SetMessage("LSP format error: " + err.Error())
+					return
+				}
+				if len(edits) == 0 {
+					a.statusBar.SetMessage("File already formatted")
+					return
+				}
+				a.applyLSPEdits(tab, edits)
+				a.statusBar.SetMessage("File formatted via LSP")
+			})
+		}()
+		return
+	}
+
+	a.statusBar.SetMessage("No formatter configured for this language")
+}
+
+// lintFile runs linters on the current file (on-demand).
+func (a *App) lintFile() {
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return
+	}
+	langID := lsp.LanguageIDForFile(tab.FilePath)
+	toolsCfg := a.config.ToolsForLanguage(langID)
+
+	if len(toolsCfg.Linters) == 0 {
+		a.statusBar.SetMessage("No linter configured for this language")
+		return
+	}
+
+	// Save first so linters work on current content
+	if err := a.editor.SaveCurrentFile(); err != nil {
+		a.output.AppendError("Error saving before lint: " + err.Error())
+		return
+	}
+
+	filePath := tab.FilePath
+	linters := toolsCfg.Linters
+	a.statusBar.SetMessage("Running linter...")
+	go func() {
+		result := editor.RunLinters(filePath, linters)
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.applyLintDiagnostics(filePath, result)
+		})
+	}()
+}
+
+// applyLintDiagnostics converts linter results to editor diagnostics.
+func (a *App) applyLintDiagnostics(filePath string, result editor.LintResult) {
+	if result.Error != nil {
+		a.statusBar.SetMessage("Lint error: " + result.Error.Error())
+		return
+	}
+
+	// Convert to editor diagnostics (keyed by 0-based line)
+	diags := make(map[int]editor.DiagnosticInfo)
+	for _, d := range result.Diagnostics {
+		line := d.Line - 1 // convert to 0-based
+		if line < 0 {
+			line = 0
+		}
+		// If multiple diagnostics on same line, keep the more severe one
+		if existing, ok := diags[line]; ok && existing.Severity < d.Severity {
+			continue
+		}
+		source := "linter"
+		diags[line] = editor.DiagnosticInfo{
+			Severity: d.Severity,
+			Message:  source + ": " + d.Message,
+		}
+	}
+
+	a.editor.SetDiagnostics(filePath, diags)
+
+	count := len(result.Diagnostics)
+	if count > 0 {
+		a.statusBar.SetMessage(fmt.Sprintf("Lint: %d issue(s) found", count))
+	} else {
+		a.statusBar.SetMessage("Lint: no issues found")
+	}
+}
+
+// applyLSPEdits applies LSP text edits to the active tab buffer.
+func (a *App) applyLSPEdits(tab *editor.Tab, edits []lsp.TextEdit) {
+	if tab == nil {
+		return
+	}
+	// For simplicity, if we have edits, save the file, apply via LSP full-replace approach:
+	// Get current text, apply edits in reverse order (to preserve positions), update buffer
+	lines := tab.Buffer.Lines()
+	// Apply edits in reverse order of position to avoid offset issues
+	for i := len(edits) - 1; i >= 0; i-- {
+		edit := edits[i]
+		startLine := edit.Range.Start.Line
+		startChar := edit.Range.Start.Character
+		endLine := edit.Range.End.Line
+		endChar := edit.Range.End.Character
+
+		// Clamp to valid range
+		if startLine < 0 {
+			startLine = 0
+		}
+		if endLine >= len(lines) {
+			endLine = len(lines) - 1
+		}
+		if startLine >= len(lines) {
+			continue
+		}
+
+		// Build the text before and after the edit range
+		prefix := ""
+		if startChar <= len(lines[startLine]) {
+			prefix = lines[startLine][:startChar]
+		}
+		suffix := ""
+		if endLine < len(lines) && endChar <= len(lines[endLine]) {
+			suffix = lines[endLine][endChar:]
+		}
+
+		// Replace the range with new text
+		newText := prefix + edit.NewText + suffix
+		newLines := strings.Split(newText, "\n")
+
+		// Splice into the lines array
+		result := make([]string, 0, len(lines)-endLine+startLine+len(newLines))
+		result = append(result, lines[:startLine]...)
+		result = append(result, newLines...)
+		if endLine+1 < len(lines) {
+			result = append(result, lines[endLine+1:]...)
+		}
+		lines = result
+	}
+
+	tab.Buffer.SetText(strings.Join(lines, "\n"))
+	tab.Buffer.SetModified(true)
 }
 
 func (a *App) closeTab() {
@@ -1181,6 +1416,83 @@ func (a *App) showAbout() {
 	a.layout.ShowDialog("about", dialog)
 }
 
+func (a *App) showToolsConfig() {
+	text := tview.NewTextView()
+	text.SetBackgroundColor(ui.ColorDialogBg)
+	text.SetTextColor(ui.ColorStatusText)
+	text.SetDynamicColors(true)
+	text.SetBorder(true)
+	text.SetBorderColor(ui.ColorStatusText)
+	text.SetTitle(" Formatters/Linters ")
+	text.SetTitleColor(ui.ColorStatusText)
+
+	var content strings.Builder
+	content.WriteString("\n")
+
+	if len(a.config.LanguageTools) == 0 {
+		content.WriteString(" No language tools configured.\n")
+		content.WriteString("\n Edit ~/.numentext/config.json to add tools.\n")
+		content.WriteString(" Example:\n")
+		content.WriteString("   \"language_tools\": {\n")
+		content.WriteString("     \"python\": {\n")
+		content.WriteString("       \"formatters\": [{\"command\":\"black\",\"args\":[\"--quiet\",\"{file}\"]}],\n")
+		content.WriteString("       \"linters\": [{\"command\":\"flake8\",\"args\":[\"{file}\"]}],\n")
+		content.WriteString("       \"format_on_save\": true,\n")
+		content.WriteString("       \"lint_on_save\": true\n")
+		content.WriteString("     }\n")
+		content.WriteString("   }\n")
+	} else {
+		for lang, ltc := range a.config.LanguageTools {
+			content.WriteString(fmt.Sprintf(" [white::b]%s[-::-]\n", lang))
+			fmtStatus := "OFF"
+			if ltc.FormatOnSave {
+				fmtStatus = "ON"
+			}
+			content.WriteString(fmt.Sprintf("   Format on save: %s\n", fmtStatus))
+			for _, f := range ltc.Formatters {
+				content.WriteString(fmt.Sprintf("     - %s %s\n", f.Command, strings.Join(f.Args, " ")))
+			}
+			if len(ltc.Formatters) == 0 {
+				content.WriteString("     (none)\n")
+			}
+			lintStatus := "OFF"
+			if ltc.LintOnSave {
+				lintStatus = "ON"
+			}
+			content.WriteString(fmt.Sprintf("   Lint on save: %s\n", lintStatus))
+			for _, l := range ltc.Linters {
+				content.WriteString(fmt.Sprintf("     - %s %s\n", l.Command, strings.Join(l.Args, " ")))
+			}
+			if len(ltc.Linters) == 0 {
+				content.WriteString("     (none)\n")
+			}
+			content.WriteString("\n")
+		}
+	}
+	content.WriteString("\n Press Escape to close\n")
+	text.SetText(content.String())
+
+	text.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			a.layout.HideDialog("toolsconfig")
+			a.tviewApp.SetFocus(a.editor)
+			return nil
+		}
+		return event
+	})
+
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(text, 24, 0, true).
+			AddItem(nil, 0, 1, false),
+			50, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	a.layout.ShowDialog("toolsconfig", modal)
+}
+
 func (a *App) showShortcuts() {
 	text := tview.NewTextView()
 	text.SetBackgroundColor(ui.ColorDialogBg)
@@ -1232,6 +1544,10 @@ func (a *App) showShortcuts() {
  Ctrl+Shift+Right    Grow file tree
  Ctrl+Shift+Up       Grow bottom panel
  Ctrl+Shift+Down     Shrink bottom panel
+
+ [white::b]Tools[-::-]
+ Ctrl+Shift+I        Format file
+ Ctrl+Shift+L        Lint file
 
  [white::b]Terminal Block Mode[-::-]
  Ctrl+Up/Down        Select prev/next command block
