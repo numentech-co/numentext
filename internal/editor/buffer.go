@@ -85,6 +85,20 @@ func (b *Buffer) Text() string {
 	return strings.Join(b.lines, "\n")
 }
 
+// SetText replaces the entire buffer content with the given text.
+// Undo history is cleared.
+func (b *Buffer) SetText(text string) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	b.lines = lines
+	b.undoStack = nil
+	b.redoStack = nil
+}
+
 func (b *Buffer) Modified() bool {
 	return b.modified
 }

@@ -114,6 +114,16 @@ func (m *Manager) NotifyClose(filePath string) {
 	client.DidClose(filePath)
 }
 
+// Format requests formatting edits from the LSP server for a file.
+// Returns nil, nil if no LSP server is available.
+func (m *Manager) Format(filePath string, tabSize int, insertSpaces bool) ([]TextEdit, error) {
+	client := m.ClientForFile(filePath)
+	if client == nil {
+		return nil, nil
+	}
+	return client.Format(filePath, tabSize, insertSpaces)
+}
+
 // DocumentSymbols returns document symbols for a file
 func (m *Manager) DocumentSymbols(filePath string) ([]DocumentSymbol, error) {
 	client := m.ClientForFile(filePath)

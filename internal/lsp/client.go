@@ -224,6 +224,31 @@ func (c *Client) Definition(filePath string, line, col int) ([]Location, error) 
 	return locs, nil
 }
 
+// Format requests document formatting from the LSP server.
+// Returns a list of text edits to apply.
+func (c *Client) Format(filePath string, tabSize int, insertSpaces bool) ([]TextEdit, error) {
+	uri := pathToURI(filePath)
+	resp, err := c.call("textDocument/formatting", DocumentFormattingParams{
+		TextDocument: TextDocumentIdentifier{URI: uri},
+		Options: FormattingOptions{
+			TabSize:      tabSize,
+			InsertSpaces: insertSpaces,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.Result == nil {
+		return nil, nil
+	}
+
+	var edits []TextEdit
+	if err := remarshal(resp.Result, &edits); err != nil {
+		return nil, fmt.Errorf("decode formatting result: %w", err)
+	}
+	return edits, nil
+}
+
 // DocumentSymbols requests document symbols for a file
 func (c *Client) DocumentSymbols(filePath string) ([]DocumentSymbol, error) {
 	uri := pathToURI(filePath)
