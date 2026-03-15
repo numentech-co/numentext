@@ -121,7 +121,7 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 	}
 
 	// Right side: panel indicator + shortcut hints
-	right := "F5:Run  F9:Build  F10:Menu "
+	right := "F4:Err  F5:Run  F9:Build  F10:Menu "
 	if sb.focusedPanel != "" {
 		right = "[" + sb.focusedPanel + "]  " + right
 	}

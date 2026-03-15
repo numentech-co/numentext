@@ -58,6 +58,9 @@ type Editor struct {
 	// Diagnostics: filePath -> line -> severity (1=error, 2=warning, 3=info, 4=hint)
 	diagnostics map[string]map[int]DiagnosticInfo
 
+	// Build error diagnostics (separate from LSP, take precedence in gutter)
+	buildDiags map[string]map[int]DiagnosticInfo
+
 	// Breakpoint check callback (returns true if breakpoint at 1-based line)
 	hasBreakpoint func(filePath string, line int) bool
 
@@ -100,6 +103,7 @@ func NewEditor() *Editor {
 		tabSize:         4,
 		completion:      NewCompletionPopup(),
 		diagnostics:     make(map[string]map[int]DiagnosticInfo),
+		buildDiags:      make(map[string]map[int]DiagnosticInfo),
 		keyMode:         keymode.NewDefaultMode(),
 	}
 	e.SetBorder(false)
@@ -393,6 +397,20 @@ func (e *Editor) DiagnosticAtLine(line int) (DiagnosticInfo, bool) {
 	}
 	d, ok := diags[line]
 	return d, ok
+}
+
+// SetBuildDiagnostics updates build error diagnostics for a file (separate from LSP).
+func (e *Editor) SetBuildDiagnostics(filePath string, diags map[int]DiagnosticInfo) {
+	if len(diags) == 0 {
+		delete(e.buildDiags, filePath)
+	} else {
+		e.buildDiags[filePath] = diags
+	}
+}
+
+// ClearAllBuildDiagnostics removes all build error markers.
+func (e *Editor) ClearAllBuildDiagnostics() {
+	e.buildDiags = make(map[string]map[int]DiagnosticInfo)
 }
 
 // Completion methods
@@ -1521,22 +1539,29 @@ func (e *Editor) Draw(screen tcell.Screen) {
 				goto gutterDone
 			}
 
-			// Check for diagnostic marker on this line
+			// Check for diagnostic marker on this line (build errors take precedence over LSP)
 			if tab.FilePath != "" {
-				if diags, ok := e.diagnostics[tab.FilePath]; ok {
-					if diag, ok := diags[lineIdx]; ok {
-						markerCh, markerFg := diagnosticMarker(diag.Severity)
-						// Draw marker in first gutter column
-						screen.SetContent(x, y+row, markerCh, nil,
-							tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg).Bold(true))
-						// Draw rest of gutter (line number) starting at position 1
-						for i, ch := range gutterStr {
-							if i > 0 && x+i < x+gutterW {
-								screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
-							}
-						}
-						goto gutterDone
+				diag, hasDiag := DiagnosticInfo{}, false
+				if bd, ok := e.buildDiags[tab.FilePath]; ok {
+					diag, hasDiag = bd[lineIdx]
+				}
+				if !hasDiag {
+					if ld, ok := e.diagnostics[tab.FilePath]; ok {
+						diag, hasDiag = ld[lineIdx]
 					}
+				}
+				if hasDiag {
+					markerCh, markerFg := diagnosticMarker(diag.Severity)
+					// Draw marker in first gutter column
+					screen.SetContent(x, y+row, markerCh, nil,
+						tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg).Bold(true))
+					// Draw rest of gutter (line number) starting at position 1
+					for i, ch := range gutterStr {
+						if i > 0 && x+i < x+gutterW {
+							screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
+						}
+					}
+					goto gutterDone
 				}
 			}
 
@@ -1630,9 +1655,26 @@ func (e *Editor) drawScrollbar(screen tcell.Screen, x, y, height int, tab *Tab) 
 
 	// Draw markers at proportional positions
 	if tab.FilePath != "" {
-		// Diagnostic markers
+		// Diagnostic markers (LSP)
 		if diags, ok := e.diagnostics[tab.FilePath]; ok {
 			for lineIdx, diag := range diags {
+				markerRow := lineIdx * height / totalLines
+				if markerRow >= height {
+					markerRow = height - 1
+				}
+				markerFg := tcell.ColorBlue
+				if diag.Severity == 1 {
+					markerFg = tcell.ColorRed
+				} else if diag.Severity == 2 {
+					markerFg = tcell.ColorYellow
+				}
+				screen.SetContent(x, y+markerRow, '\u2588', nil,
+					tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorBgDarker))
+			}
+		}
+		// Build error markers (overwrite LSP markers on same line)
+		if bdiags, ok := e.buildDiags[tab.FilePath]; ok {
+			for lineIdx, diag := range bdiags {
 				markerRow := lineIdx * height / totalLines
 				if markerRow >= height {
 					markerRow = height - 1
@@ -1888,20 +1930,27 @@ func (e *Editor) drawGutterForLine(screen tcell.Screen, x, y, gutterW, lineIdx i
 		return
 	}
 
-	// Check for diagnostic marker
+	// Check for diagnostic marker (build errors take precedence over LSP)
 	if tab.FilePath != "" {
-		if diags, ok := e.diagnostics[tab.FilePath]; ok {
-			if diag, ok := diags[lineIdx]; ok {
-				markerCh, markerFg := diagnosticMarker(diag.Severity)
-				screen.SetContent(x, y, markerCh, nil,
-					tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg).Bold(true))
-				for i, ch := range gutterStr {
-					if i > 0 && x+i < x+gutterW {
-						screen.SetContent(x+i, y, ch, nil, gutterStyle)
-					}
-				}
-				return
+		diag, hasDiag := DiagnosticInfo{}, false
+		if bd, ok := e.buildDiags[tab.FilePath]; ok {
+			diag, hasDiag = bd[lineIdx]
+		}
+		if !hasDiag {
+			if ld, ok := e.diagnostics[tab.FilePath]; ok {
+				diag, hasDiag = ld[lineIdx]
 			}
+		}
+		if hasDiag {
+			markerCh, markerFg := diagnosticMarker(diag.Severity)
+			screen.SetContent(x, y, markerCh, nil,
+				tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg).Bold(true))
+			for i, ch := range gutterStr {
+				if i > 0 && x+i < x+gutterW {
+					screen.SetContent(x+i, y, ch, nil, gutterStyle)
+				}
+			}
+			return
 		}
 	}
 

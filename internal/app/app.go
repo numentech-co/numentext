@@ -58,13 +58,18 @@ type App struct {
 	dragStartY  int
 	dragStartW  int // file tree width at drag start
 	dragStartH  int // output height at drag start
+
+	// Build error navigation
+	buildErrors    []runner.BuildError
+	buildErrorIdx  int // current error index (0-based), -1 if none
 }
 
 func New() *App {
 	a := &App{
-		tviewApp: tview.NewApplication(),
-		runner:   runner.New(),
-		config:   config.Load(),
+		tviewApp:      tview.NewApplication(),
+		runner:        runner.New(),
+		config:        config.Load(),
+		buildErrorIdx: -1,
 	}
 
 	a.workDir, _ = os.Getwd()
@@ -103,6 +108,10 @@ func (a *App) setupUI() {
 	// Wire callbacks
 	a.editor.SetOnChange(func() {
 		a.updateStatusBar()
+		// Clear build error markers when user edits a file
+		if len(a.buildErrors) > 0 {
+			a.clearBuildErrors()
+		}
 	})
 	a.editor.SetOnTabChange(func() {
 		a.updateStatusBar()
@@ -510,6 +519,13 @@ func (a *App) setupKeybindings() {
 			return nil
 		case tcell.KeyF12:
 			a.goToDefinition()
+			return nil
+		case tcell.KeyF4:
+			if shift {
+				a.prevBuildError()
+			} else {
+				a.nextBuildError()
+			}
 			return nil
 		case tcell.KeyF5:
 			if a.termPanel.HasFocus() {
@@ -1107,6 +1123,9 @@ func (a *App) runFile() {
 		}
 	}
 
+	// Clear previous build errors
+	a.clearBuildErrors()
+
 	a.output.Clear()
 	a.output.AppendCommand(runner.FormatRunCommand(tab.FilePath))
 
@@ -1123,6 +1142,7 @@ func (a *App) runFile() {
 				a.output.AppendSuccess(fmt.Sprintf("\nProcess exited with code 0 (%.2fs)", result.Duration.Seconds()))
 			} else {
 				a.output.AppendError(fmt.Sprintf("\nProcess exited with code %d (%.2fs)", result.ExitCode, result.Duration.Seconds()))
+				a.handleBuildErrors(result)
 			}
 		})
 	}()
@@ -1144,6 +1164,9 @@ func (a *App) buildFile() {
 		}
 	}
 
+	// Clear previous build errors
+	a.clearBuildErrors()
+
 	a.output.Clear()
 	buildCmd := runner.FormatBuildCommand(tab.FilePath)
 	if buildCmd == "" {
@@ -1163,9 +1186,119 @@ func (a *App) buildFile() {
 			}
 			if result.ExitCode == 0 {
 				a.output.AppendSuccess(fmt.Sprintf("Build successful (%.2fs)", result.Duration.Seconds()))
+			} else {
+				a.handleBuildErrors(result)
 			}
 		})
 	}()
+}
+
+// handleBuildErrors parses build output for errors, sets gutter markers, and jumps to first error.
+func (a *App) handleBuildErrors(result *runner.Result) {
+	output := result.Output
+	if output == "" {
+		output = result.Error
+	}
+	errors := runner.ParseBuildOutput(output)
+	if len(errors) == 0 {
+		return
+	}
+
+	a.buildErrors = errors
+	a.buildErrorIdx = 0
+
+	// Set build diagnostic markers in the editor for each file
+	fileErrors := make(map[string]map[int]editor.DiagnosticInfo)
+	for _, be := range errors {
+		if fileErrors[be.File] == nil {
+			fileErrors[be.File] = make(map[int]editor.DiagnosticInfo)
+		}
+		lineIdx := be.Line - 1 // Convert to 0-based
+		if lineIdx < 0 {
+			lineIdx = 0
+		}
+		sev := 1 // error
+		if be.Severity == "warning" {
+			sev = 2
+		} else if be.Severity == "note" {
+			sev = 3
+		}
+		// Only store first error per line
+		if _, exists := fileErrors[be.File][lineIdx]; !exists {
+			fileErrors[be.File][lineIdx] = editor.DiagnosticInfo{
+				Severity: sev,
+				Message:  be.Message,
+			}
+		}
+	}
+	for file, diags := range fileErrors {
+		a.editor.SetBuildDiagnostics(file, diags)
+	}
+
+	// Jump to first error
+	a.jumpToBuildError(0)
+}
+
+// clearBuildErrors removes all build error state and gutter markers.
+func (a *App) clearBuildErrors() {
+	a.buildErrors = nil
+	a.buildErrorIdx = -1
+	a.editor.ClearAllBuildDiagnostics()
+}
+
+// jumpToBuildError opens the file and jumps to the error at the given index.
+func (a *App) jumpToBuildError(idx int) {
+	if idx < 0 || idx >= len(a.buildErrors) {
+		return
+	}
+	be := a.buildErrors[idx]
+	a.buildErrorIdx = idx
+
+	// Resolve file path relative to working directory
+	filePath := be.File
+	if !strings.HasPrefix(filePath, "/") {
+		filePath = a.workDir + "/" + filePath
+	}
+
+	// Open file (switches to tab if already open)
+	err := a.editor.OpenFile(filePath)
+	if err != nil {
+		a.statusBar.SetMessage(fmt.Sprintf("Cannot open %s: %s", be.File, err.Error()))
+		return
+	}
+
+	// Jump to error line (1-based)
+	a.editor.GoToLine(be.Line)
+	a.focusPanel("editor")
+
+	// Show error info in status bar
+	a.statusBar.SetMessage(fmt.Sprintf("Error %d of %d: %s", idx+1, len(a.buildErrors), be.Message))
+}
+
+// nextBuildError jumps to the next build error (wraps around).
+func (a *App) nextBuildError() {
+	if len(a.buildErrors) == 0 {
+		a.statusBar.SetMessage("No build errors")
+		return
+	}
+	next := a.buildErrorIdx + 1
+	if next >= len(a.buildErrors) {
+		next = 0
+	}
+	a.jumpToBuildError(next)
+}
+
+// prevBuildError jumps to the previous build error (wraps around).
+func (a *App) prevBuildError() {
+	if len(a.buildErrors) == 0 {
+		a.statusBar.SetMessage("No build errors")
+		return
+	}
+	prev := a.buildErrorIdx - 1
+	if prev < 0 {
+		prev = len(a.buildErrors) - 1
+	}
+	a.jumpToBuildError(prev)
 }
 
 func (a *App) stopRun() {
@@ -1214,6 +1347,8 @@ func (a *App) showShortcuts() {
  Ctrl+G    Go to line
 
  [white::b]Run[-::-]
+ F4        Next error
+ Shift+F4  Previous error
  F5        Run
  F9        Build
  F10       Menu bar
