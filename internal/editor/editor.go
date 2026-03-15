@@ -64,8 +64,14 @@ type Editor struct {
 	// Breakpoint check callback (returns true if breakpoint at 1-based line)
 	hasBreakpoint func(filePath string, line int) bool
 
+	// Bracket matching (computed per Draw call)
+	bracketMatch BracketMatch
+
 	// Keyboard mode
 	keyMode keymode.KeyMapper
+
+	// Status message callback (for showing messages in status bar)
+	onStatusMessage func(msg string)
 
 	// Action callbacks for actions that need app-level handling
 	onSearchForward func()
@@ -364,6 +370,9 @@ func (e *Editor) KeyModeContext() keymode.KeyContext {
 		PageHeight:   height - 1, // minus tab bar
 	}
 }
+
+// SetOnStatusMessage sets the callback for status bar messages
+func (e *Editor) SetOnStatusMessage(fn func(string)) { e.onStatusMessage = fn }
 
 // SetOnSearchForward sets the callback for / search action
 func (e *Editor) SetOnSearchForward(fn func()) { e.onSearchForward = fn }
@@ -1289,6 +1298,24 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 		if e.onSearchPrev != nil {
 			e.onSearchPrev()
 		}
+	case ActionMatchBracket:
+		// Jump to matching bracket
+		// Use cached highlight data for string/comment detection
+		highlighted := e.cachedHL
+		if highlighted == nil {
+			highlighted = tab.Highlighter.Highlight(tab.Buffer.Text())
+		}
+		match := e.FindMatchingBracket(tab, highlighted)
+		if match.FoundBracket {
+			if match.HasMatch {
+				e.clearSelection(tab)
+				tab.CursorRow = match.MatchLine
+				tab.CursorCol = match.MatchCol
+			} else if e.onStatusMessage != nil {
+				e.onStatusMessage("No matching bracket found")
+			}
+		}
+
 	case ActionEnterCommandMode:
 		// Handled by the key mode itself
 	}
@@ -1499,6 +1526,9 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		e.cachedHLVer = e.hlVersion
 	}
 	highlighted := e.cachedHL
+
+	// Compute bracket matching for cursor position
+	e.bracketMatch = e.FindMatchingBracket(tab, highlighted)
 
 	// Word wrap mode: different rendering path
 	if e.wordWrap {
@@ -2017,10 +2047,7 @@ func (e *Editor) drawPlainLineSegment(screen tcell.Screen, x, y, maxWidth int, l
 				if sx >= x+maxWidth {
 					break
 				}
-				style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
-				if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
-					style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
-				}
+				style := e.plainStyleAt(tab, lineIdx, i)
 				screen.SetContent(sx, y, ' ', nil, style)
 			}
 			screenCol += tabW
@@ -2030,10 +2057,7 @@ func (e *Editor) drawPlainLineSegment(screen tcell.Screen, x, y, maxWidth int, l
 		if sx >= x+maxWidth {
 			break
 		}
-		style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
-		if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
-			style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
-		}
+		style := e.plainStyleAt(tab, lineIdx, i)
 		screen.SetContent(sx, y, ch, nil, style)
 		screenCol++
 	}
@@ -2151,10 +2175,7 @@ func (e *Editor) drawPlainLine(screen tcell.Screen, x, y, maxWidth int, line str
 			for t := 0; t < tabW; t++ {
 				sx := x + screenCol - scrollScreenCol + t
 				if sx >= x && sx < x+maxWidth {
-					style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
-					if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
-						style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
-					}
+					style := e.plainStyleAt(tab, lineIdx, i)
 					screen.SetContent(sx, y, ' ', nil, style)
 				}
 			}
@@ -2163,14 +2184,33 @@ func (e *Editor) drawPlainLine(screen tcell.Screen, x, y, maxWidth int, line str
 		}
 		sx := x + screenCol - scrollScreenCol
 		if sx >= x && sx < x+maxWidth {
-			style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
-			if tab.HasSelect && e.isInSelection(tab, lineIdx, i) {
-				style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
-			}
+			style := e.plainStyleAt(tab, lineIdx, i)
 			screen.SetContent(sx, y, ch, nil, style)
 		}
 		screenCol++
 	}
+}
+
+// plainStyleAt returns the style for a byte offset in a plain (non-highlighted) line,
+// including selection and bracket match highlighting.
+func (e *Editor) plainStyleAt(tab *Tab, lineIdx, byteOff int) tcell.Style {
+	style := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
+	if tab.HasSelect && e.isInSelection(tab, lineIdx, byteOff) {
+		style = style.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
+	}
+	if e.bracketMatch.FoundBracket {
+		if lineIdx == e.bracketMatch.StartLine && byteOff == e.bracketMatch.StartCol {
+			if e.bracketMatch.HasMatch {
+				style = tcell.StyleDefault.Foreground(ui.ColorBracketMatchFg).Background(ui.ColorBracketMatch).Bold(true)
+			} else {
+				style = tcell.StyleDefault.Foreground(ui.ColorBracketErrorFg).Background(ui.ColorBracketError).Bold(true)
+			}
+		}
+		if e.bracketMatch.HasMatch && lineIdx == e.bracketMatch.MatchLine && byteOff == e.bracketMatch.MatchCol {
+			style = tcell.StyleDefault.Foreground(ui.ColorBracketMatchFg).Background(ui.ColorBracketMatch).Bold(true)
+		}
+	}
+	return style
 }
 
 // hlStyleAt returns the tcell style for a byte offset in a highlighted line.
@@ -2187,6 +2227,19 @@ func (e *Editor) hlStyleAt(hl HighlightedLine, byteOff int, tab *Tab, lineIdx in
 	}
 	if tab.HasSelect && e.isInSelection(tab, lineIdx, byteOff) {
 		style = tcell.StyleDefault.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
+	}
+	// Bracket match highlighting (overrides selection for bracket positions)
+	if e.bracketMatch.FoundBracket {
+		if lineIdx == e.bracketMatch.StartLine && byteOff == e.bracketMatch.StartCol {
+			if e.bracketMatch.HasMatch {
+				style = tcell.StyleDefault.Foreground(ui.ColorBracketMatchFg).Background(ui.ColorBracketMatch).Bold(true)
+			} else {
+				style = tcell.StyleDefault.Foreground(ui.ColorBracketErrorFg).Background(ui.ColorBracketError).Bold(true)
+			}
+		}
+		if e.bracketMatch.HasMatch && lineIdx == e.bracketMatch.MatchLine && byteOff == e.bracketMatch.MatchCol {
+			style = tcell.StyleDefault.Foreground(ui.ColorBracketMatchFg).Background(ui.ColorBracketMatch).Bold(true)
+		}
 	}
 	return style
 }

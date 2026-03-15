@@ -117,6 +117,11 @@ func (a *App) setupUI() {
 		a.updateStatusBar()
 	})
 
+	// Status message callback for editor
+	a.editor.SetOnStatusMessage(func(msg string) {
+		a.statusBar.SetMessage(msg)
+	})
+
 	// Search callbacks for Vi/Helix modes
 	a.editor.SetOnSearchForward(func() {
 		a.showFind()

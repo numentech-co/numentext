@@ -55,6 +55,12 @@ var (
 	// Border
 	ColorBorder = tcell.NewRGBColor(0, 170, 170)
 
+	// Bracket matching
+	ColorBracketMatch   = tcell.NewRGBColor(0, 170, 0)    // Green background for matching brackets
+	ColorBracketMatchFg = tcell.NewRGBColor(255, 255, 255) // White text on match
+	ColorBracketError   = tcell.NewRGBColor(170, 0, 0)     // Red background for unmatched brackets
+	ColorBracketErrorFg = tcell.NewRGBColor(255, 255, 255)  // White text on error
+
 	// Panel focus indicator
 	ColorPanelFocused = tcell.NewRGBColor(255, 255, 85)  // Yellow - active panel border/title
 	ColorPanelBlurred = tcell.NewRGBColor(85, 85, 85)    // Dark gray - inactive panel title
