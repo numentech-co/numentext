@@ -62,6 +62,20 @@ func TestDetectLanguage_Java(t *testing.T) {
 	}
 }
 
+func TestDetectLanguage_Kotlin(t *testing.T) {
+	lang := DetectLanguage("Main.kt")
+	if lang == nil || lang.Name != "Kotlin" {
+		t.Errorf("expected Kotlin, got %v", lang)
+	}
+}
+
+func TestDetectLanguage_KotlinScript(t *testing.T) {
+	lang := DetectLanguage("build.gradle.kts")
+	if lang == nil || lang.Name != "Kotlin" {
+		t.Errorf("expected Kotlin, got %v", lang)
+	}
+}
+
 func TestDetectLanguage_Unknown(t *testing.T) {
 	lang := DetectLanguage("readme.txt")
 	if lang != nil {
@@ -184,6 +198,35 @@ func TestJavaBuildAndRun(t *testing.T) {
 	// Should have -cp /tmp/src Main
 	if len(args) < 3 || args[0] != "-cp" {
 		t.Errorf("unexpected run args: %v", args)
+	}
+}
+
+func TestKotlinBuildAndRun(t *testing.T) {
+	lang := DetectLanguage("Main.kt")
+	if lang == nil {
+		t.Fatal("expected Kotlin language config")
+	}
+	cmd, args := lang.BuildCmd("/tmp/Main.kt")
+	if cmd != "kotlinc" {
+		t.Errorf("expected kotlinc, got %s", cmd)
+	}
+	// Should have -include-runtime -d Main.jar
+	foundRuntime := false
+	for _, a := range args {
+		if a == "-include-runtime" {
+			foundRuntime = true
+		}
+	}
+	if !foundRuntime {
+		t.Error("expected -include-runtime flag for Kotlin build")
+	}
+
+	cmd, args = lang.RunCmd("/tmp/Main.kt")
+	if cmd != "java" {
+		t.Errorf("expected java, got %s", cmd)
+	}
+	if len(args) < 2 || args[0] != "-jar" {
+		t.Errorf("expected '-jar Main.jar', got %v", args)
 	}
 }
 

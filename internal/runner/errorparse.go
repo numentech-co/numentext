@@ -63,6 +63,24 @@ var errorPatterns = []errorPattern{
 		severity: 3,
 		message:  4,
 	},
+	// kotlinc: file.kt:5:10: error: unresolved reference: foo
+	{
+		re:       regexp.MustCompile(`^([^\s:]+\.kts?):(\d+):(\d+):\s+(error|warning):\s+(.+)$`),
+		file:     1,
+		line:     2,
+		col:      3,
+		severity: 4,
+		message:  5,
+	},
+	// kotlinc without column: file.kt:5: error: something
+	{
+		re:       regexp.MustCompile(`^([^\s:]+\.kts?):(\d+):\s+(error|warning):\s+(.+)$`),
+		file:     1,
+		line:     2,
+		col:      0,
+		severity: 3,
+		message:  4,
+	},
 	// tsc: src/app.ts(10,3): error TS2304: Cannot find name 'x'
 	{
 		re:       regexp.MustCompile(`^([^\s(]+)\((\d+),(\d+)\):\s+(error|warning)\s+\w+:\s+(.+)$`),

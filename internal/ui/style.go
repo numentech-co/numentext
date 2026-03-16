@@ -67,7 +67,7 @@ func (s UIStyle) DirIconClosed() string {
 var fileIconsASCII = map[string]string{
 	".go": "g", ".c": "c", ".h": "c", ".cpp": "c", ".cc": "c", ".cxx": "c", ".hpp": "c",
 	".py": "p", ".rs": "r", ".js": "j", ".jsx": "j", ".ts": "t", ".tsx": "t",
-	".java": "j", ".json": "~", ".md": "m", ".html": "h", ".htm": "h",
+	".java": "j", ".kt": "k", ".kts": "k", ".json": "~", ".md": "m", ".html": "h", ".htm": "h",
 	".css": "#", ".sh": "$", ".bash": "$", ".yaml": "y", ".yml": "y",
 }
 
@@ -75,7 +75,7 @@ var fileIconsASCII = map[string]string{
 var fileIconsUnicode = map[string]string{
 	".go": "\u25c6", ".c": "\u25a0", ".h": "\u25a0", ".cpp": "\u25a0", ".cc": "\u25a0", ".cxx": "\u25a0", ".hpp": "\u25a0",
 	".py": "\u25c8", ".rs": "\u25a3", ".js": "\u25cb", ".jsx": "\u25cb", ".ts": "\u25ca", ".tsx": "\u25ca",
-	".java": "\u25cf", ".json": "\u25e6", ".md": "\u25ab", ".html": "\u25a1", ".htm": "\u25a1",
+	".java": "\u25cf", ".kt": "\u25cf", ".kts": "\u25cf", ".json": "\u25e6", ".md": "\u25ab", ".html": "\u25a1", ".htm": "\u25a1",
 	".css": "\u25a8", ".sh": "\u25b7", ".bash": "\u25b7", ".yaml": "\u25aa", ".yml": "\u25aa",
 }
 
@@ -83,7 +83,7 @@ var fileIconsUnicode = map[string]string{
 var fileIconsNerdFont = map[string]string{
 	".go": "\ue627", ".c": "\ue61e", ".h": "\ue61e", ".cpp": "\ue61d", ".cc": "\ue61d", ".cxx": "\ue61d", ".hpp": "\ue61d",
 	".py": "\ue73c", ".rs": "\ue7a8", ".js": "\ue74e", ".jsx": "\ue7ba", ".ts": "\ue628", ".tsx": "\ue7ba",
-	".java": "\ue738", ".json": "\ue60b", ".md": "\ue73e", ".html": "\ue736", ".htm": "\ue736",
+	".java": "\ue738", ".kt": "\ue634", ".kts": "\ue634", ".json": "\ue60b", ".md": "\ue73e", ".html": "\ue736", ".htm": "\ue736",
 	".css": "\ue749", ".sh": "\ue795", ".bash": "\ue795", ".yaml": "\ue6a8", ".yml": "\ue6a8",
 }
 

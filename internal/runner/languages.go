@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -88,14 +89,71 @@ var Languages = map[string]*LangConfig{
 		Name:       "Java",
 		Extensions: []string{".java"},
 		BuildCmd: func(filePath string) (string, []string) {
+			dir := filepath.Dir(filePath)
+			// Maven project
+			if fileExistsAt(filepath.Join(dir, "pom.xml")) {
+				return "mvn", []string{"-f", filepath.Join(dir, "pom.xml"), "compile"}
+			}
+			// Gradle project (Kotlin DSL or Groovy DSL)
+			if fileExistsAt(filepath.Join(dir, "build.gradle.kts")) || fileExistsAt(filepath.Join(dir, "build.gradle")) {
+				return "gradle", []string{"-p", dir, "build"}
+			}
+			// Single file fallback
 			return "javac", []string{filePath}
 		},
 		RunCmd: func(filePath string) (string, []string) {
 			dir := filepath.Dir(filePath)
+			// Maven project
+			if fileExistsAt(filepath.Join(dir, "pom.xml")) {
+				return "mvn", []string{"-f", filepath.Join(dir, "pom.xml"), "exec:java"}
+			}
+			// Gradle project
+			if fileExistsAt(filepath.Join(dir, "build.gradle.kts")) || fileExistsAt(filepath.Join(dir, "build.gradle")) {
+				return "gradle", []string{"-p", dir, "run"}
+			}
+			// Single file fallback
 			name := strings.TrimSuffix(filepath.Base(filePath), ".java")
 			return "java", []string{"-cp", dir, name}
 		},
 	},
+	"kotlin": {
+		Name:       "Kotlin",
+		Extensions: []string{".kt", ".kts"},
+		BuildCmd: func(filePath string) (string, []string) {
+			dir := filepath.Dir(filePath)
+			// Gradle project (Kotlin DSL or Groovy DSL)
+			if fileExistsAt(filepath.Join(dir, "build.gradle.kts")) || fileExistsAt(filepath.Join(dir, "build.gradle")) {
+				return "gradle", []string{"-p", dir, "build"}
+			}
+			// Maven project
+			if fileExistsAt(filepath.Join(dir, "pom.xml")) {
+				return "mvn", []string{"-f", filepath.Join(dir, "pom.xml"), "compile"}
+			}
+			// Single file: kotlinc compiles to jar
+			base := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+			return "kotlinc", []string{filePath, "-include-runtime", "-d", base + ".jar"}
+		},
+		RunCmd: func(filePath string) (string, []string) {
+			dir := filepath.Dir(filePath)
+			// Gradle project
+			if fileExistsAt(filepath.Join(dir, "build.gradle.kts")) || fileExistsAt(filepath.Join(dir, "build.gradle")) {
+				return "gradle", []string{"-p", dir, "run"}
+			}
+			// Maven project
+			if fileExistsAt(filepath.Join(dir, "pom.xml")) {
+				return "mvn", []string{"-f", filepath.Join(dir, "pom.xml"), "exec:java"}
+			}
+			// Single file: run the compiled jar
+			base := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+			return "java", []string{"-jar", base + ".jar"}
+		},
+	},
+}
+
+// fileExistsAt checks if a file exists at the given path.
+func fileExistsAt(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // DetectLanguage returns the language config for a file

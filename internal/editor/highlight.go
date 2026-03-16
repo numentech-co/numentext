@@ -63,6 +63,8 @@ func (h *Highlighter) DetectLanguage(filename string) {
 		h.lang = "JSX"
 	case ".java":
 		h.lang = "Java"
+	case ".kt", ".kts":
+		h.lang = "Kotlin"
 	case ".json":
 		h.lang = "JSON"
 	case ".yaml", ".yml":

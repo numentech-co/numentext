@@ -53,6 +53,10 @@ func ServerForFile(filePath string) *ServerConfig {
 		if _, err := exec.LookPath("jdtls"); err == nil {
 			return &ServerConfig{Command: "jdtls", LanguageID: "java"}
 		}
+	case ".kt", ".kts":
+		if _, err := exec.LookPath("kotlin-language-server"); err == nil {
+			return &ServerConfig{Command: "kotlin-language-server", LanguageID: "kotlin"}
+		}
 	}
 	return nil
 }
@@ -66,7 +70,8 @@ var LSPInstallCommands = map[string]string{
 	"cpp":        "install clangd",
 	"javascript": "npm install -g typescript-language-server typescript",
 	"typescript": "npm install -g typescript-language-server typescript",
-	"java":       "install jdtls",
+	"java":   "install jdtls",
+	"kotlin": "Install kotlin-language-server from https://github.com/fwcd/kotlin-language-server",
 }
 
 // LanguageIDForFile returns the LSP languageId for a file extension
@@ -89,6 +94,8 @@ func LanguageIDForFile(filePath string) string {
 		return "typescript"
 	case ".java":
 		return "java"
+	case ".kt", ".kts":
+		return "kotlin"
 	default:
 		return ""
 	}

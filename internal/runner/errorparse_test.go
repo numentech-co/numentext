@@ -239,6 +239,76 @@ SyntaxError: expected ':'`
 	}
 }
 
+func TestParseKotlincErrors(t *testing.T) {
+	output := `Main.kt:5:10: error: unresolved reference: foo
+Main.kt:12:3: warning: parameter 'x' is never used`
+	errors := ParseBuildOutput(output)
+	if len(errors) != 2 {
+		t.Fatalf("expected 2 errors, got %d", len(errors))
+	}
+
+	e := errors[0]
+	if e.File != "Main.kt" {
+		t.Errorf("file: got %q, want %q", e.File, "Main.kt")
+	}
+	if e.Line != 5 {
+		t.Errorf("line: got %d, want 5", e.Line)
+	}
+	if e.Col != 10 {
+		t.Errorf("col: got %d, want 10", e.Col)
+	}
+	if e.Severity != "error" {
+		t.Errorf("severity: got %q, want %q", e.Severity, "error")
+	}
+	if e.Message != "unresolved reference: foo" {
+		t.Errorf("message: got %q", e.Message)
+	}
+
+	w := errors[1]
+	if w.Severity != "warning" {
+		t.Errorf("severity: got %q, want %q", w.Severity, "warning")
+	}
+	if w.Line != 12 {
+		t.Errorf("line: got %d, want 12", w.Line)
+	}
+	if w.Col != 3 {
+		t.Errorf("col: got %d, want 3", w.Col)
+	}
+}
+
+func TestParseKotlincErrorsKts(t *testing.T) {
+	output := `build.gradle.kts:10:5: error: unresolved reference: something`
+	errors := ParseBuildOutput(output)
+	if len(errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(errors))
+	}
+	e := errors[0]
+	if e.File != "build.gradle.kts" {
+		t.Errorf("file: got %q, want %q", e.File, "build.gradle.kts")
+	}
+	if e.Line != 10 {
+		t.Errorf("line: got %d, want 10", e.Line)
+	}
+}
+
+func TestParseKotlincErrorNoColumn(t *testing.T) {
+	output := `script.kts:7: error: expecting member declaration`
+	errors := ParseBuildOutput(output)
+	if len(errors) != 1 {
+		t.Fatalf("expected 1 error, got %d", len(errors))
+	}
+	e := errors[0]
+	if e.File != "script.kts" {
+		t.Errorf("file: got %q, want %q", e.File, "script.kts")
+	}
+	if e.Line != 7 {
+		t.Errorf("line: got %d, want 7", e.Line)
+	}
+	if e.Col != 0 {
+		t.Errorf("col: got %d, want 0", e.Col)
+	}
+}
+
 func TestParseRustMultipleErrors(t *testing.T) {
 	output := `error[E0425]: cannot find value 'x' in this scope
  --> src/main.rs:3:5

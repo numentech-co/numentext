@@ -92,6 +92,27 @@ var defaultToolConfigs = map[string]DefaultToolConfig{
 		FormatOnSave: false,
 		LintOnSave:   false,
 	},
+	"java": {
+		Formatters: []ToolDef{
+			{Command: "google-java-format", Args: []string{"--replace", "{file}"}},
+		},
+		Linters: []ToolDef{
+			{Command: "checkstyle", Args: []string{"-c", "/google_checks.xml", "{file}"}},
+		},
+		FormatOnSave: false,
+		LintOnSave:   false,
+	},
+	"kotlin": {
+		Formatters: []ToolDef{
+			{Command: "ktlint", Args: []string{"-F", "{file}"}},
+		},
+		Linters: []ToolDef{
+			{Command: "ktlint", Args: []string{"{file}"}},
+			{Command: "detekt", Args: []string{"--input", "{file}"}},
+		},
+		FormatOnSave: false,
+		LintOnSave:   false,
+	},
 }
 
 // ToolStatus represents whether a tool is installed and available.

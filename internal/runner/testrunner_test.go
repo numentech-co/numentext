@@ -200,6 +200,114 @@ func TestDetectTestCommandForFileRust(t *testing.T) {
 	}
 }
 
+func TestParseMavenTestOutput(t *testing.T) {
+	output := `[INFO] Running com.example.AppTest
+[ERROR]   AppTest.testAdd:25 expected: <3> but was: <2>
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.05 s - in com.example.PassingTest
+[ERROR] Tests run: 2, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.1 s <<< FAILURE! - in com.example.AppTest`
+
+	entries := ParseTestOutput("mvn", output)
+	if len(entries) < 2 {
+		t.Fatalf("expected at least 2 test entries, got %d", len(entries))
+	}
+
+	// Should have the individual failure
+	foundFail := false
+	foundPass := false
+	for _, e := range entries {
+		if e.Name == "AppTest.testAdd" && e.Status == "fail" {
+			foundFail = true
+			if e.Line != 25 {
+				t.Errorf("fail line: got %d, want 25", e.Line)
+			}
+		}
+		if e.Name == "com.example.PassingTest" && e.Status == "pass" {
+			foundPass = true
+		}
+	}
+	if !foundFail {
+		t.Error("expected to find failed test AppTest.testAdd")
+	}
+	if !foundPass {
+		t.Error("expected to find passing test com.example.PassingTest")
+	}
+}
+
+func TestParseGradleTestOutput(t *testing.T) {
+	output := `com.example.AppTest > testAdd PASSED
+com.example.AppTest > testSubtract FAILED
+com.example.AppTest > testSkipped SKIPPED
+
+3 tests completed, 1 failed, 1 skipped`
+
+	entries := ParseTestOutput("gradle", output)
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 test entries, got %d", len(entries))
+	}
+
+	if entries[0].Name != "com.example.AppTest.testAdd" || entries[0].Status != "pass" {
+		t.Errorf("entry 0: got %s/%s, want com.example.AppTest.testAdd/pass", entries[0].Name, entries[0].Status)
+	}
+	if entries[1].Name != "com.example.AppTest.testSubtract" || entries[1].Status != "fail" {
+		t.Errorf("entry 1: got %s/%s, want com.example.AppTest.testSubtract/fail", entries[1].Name, entries[1].Status)
+	}
+	if entries[2].Name != "com.example.AppTest.testSkipped" || entries[2].Status != "skip" {
+		t.Errorf("entry 2: got %s/%s, want com.example.AppTest.testSkipped/skip", entries[2].Name, entries[2].Status)
+	}
+}
+
+func TestDetectTestCommandForFileKotlinGradle(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "build.gradle.kts", "")
+
+	cmd, args := DetectTestCommandForFile("Main.kt", dir, "")
+	if cmd != "gradle" {
+		t.Errorf("expected gradle, got %s", cmd)
+	}
+	if len(args) < 1 || args[0] != "test" {
+		t.Errorf("expected test arg, got %v", args)
+	}
+}
+
+func TestDetectTestCommandForFileJavaGradle(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "build.gradle", "")
+
+	cmd, args := DetectTestCommandForFile("Main.java", dir, "")
+	if cmd != "gradle" {
+		t.Errorf("expected gradle, got %s", cmd)
+	}
+	if len(args) < 1 || args[0] != "test" {
+		t.Errorf("expected test arg, got %v", args)
+	}
+}
+
+func TestDetectTestCommandMaven(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "pom.xml", "<project/>")
+
+	cmd, args := DetectTestCommand(dir, "")
+	if cmd != "mvn" {
+		t.Errorf("expected mvn, got %s", cmd)
+	}
+	if len(args) < 1 || args[0] != "test" {
+		t.Errorf("expected test arg, got %v", args)
+	}
+}
+
+func TestDetectTestCommandGradle(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "build.gradle.kts", "")
+
+	cmd, args := DetectTestCommand(dir, "")
+	if cmd != "gradle" {
+		t.Errorf("expected gradle, got %s", cmd)
+	}
+	if len(args) < 1 || args[0] != "test" {
+		t.Errorf("expected test arg, got %v", args)
+	}
+}
+
 func TestColorizeTestOutput(t *testing.T) {
 	input := "--- PASS: TestFoo (0.00s)\n--- FAIL: TestBar (0.01s)"
 	result := ColorizeTestOutput(input)

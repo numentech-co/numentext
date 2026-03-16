@@ -88,6 +88,16 @@ func DetectTestCommand(dir string, customCmd string) (string, []string) {
 		return "npm", []string{"test"}
 	}
 
+	// Maven project
+	if fileExists(filepath.Join(dir, "pom.xml")) {
+		return "mvn", []string{"test"}
+	}
+
+	// Gradle project (Kotlin DSL or Groovy DSL)
+	if fileExists(filepath.Join(dir, "build.gradle.kts")) || fileExists(filepath.Join(dir, "build.gradle")) {
+		return "gradle", []string{"test"}
+	}
+
 	// Python: check for conftest.py (pytest) or fallback to unittest
 	if fileExists(filepath.Join(dir, "conftest.py")) {
 		return "pytest", []string{"-v"}
@@ -131,7 +141,22 @@ func DetectTestCommandForFile(filePath, dir, customCmd string) (string, []string
 	case ".js", ".jsx", ".ts", ".tsx":
 		return "npm", []string{"test"}
 	case ".java":
+		// Gradle project (check both Kotlin DSL and Groovy DSL)
+		if fileExists(filepath.Join(dir, "build.gradle.kts")) || fileExists(filepath.Join(dir, "build.gradle")) {
+			return "gradle", []string{"test"}
+		}
+		// Maven project
 		return "mvn", []string{"test"}
+	case ".kt", ".kts":
+		// Gradle project (preferred for Kotlin)
+		if fileExists(filepath.Join(dir, "build.gradle.kts")) || fileExists(filepath.Join(dir, "build.gradle")) {
+			return "gradle", []string{"test"}
+		}
+		// Maven fallback
+		if fileExists(filepath.Join(dir, "pom.xml")) {
+			return "mvn", []string{"test"}
+		}
+		return "gradle", []string{"test"}
 	default:
 		// Fall back to directory-based detection
 		return DetectTestCommand(dir, "")
@@ -207,6 +232,10 @@ func ParseTestOutput(cmdName string, output string) []TestEntry {
 		return parsePytestOutput(output)
 	case cmdName == "cargo" || strings.HasSuffix(cmdName, "/cargo"):
 		return parseCargoTestOutput(output)
+	case cmdName == "mvn" || strings.HasSuffix(cmdName, "/mvn"):
+		return parseMavenTestOutput(output)
+	case cmdName == "gradle" || strings.HasSuffix(cmdName, "/gradle") || cmdName == "gradlew" || strings.HasSuffix(cmdName, "/gradlew"):
+		return parseGradleTestOutput(output)
 	default:
 		return parseGenericTestOutput(output)
 	}
@@ -346,6 +375,92 @@ func parseCargoTestOutput(output string) []TestEntry {
 	return entries
 }
 
+// Maven individual test result (from Surefire verbose output):
+// [INFO] Running com.example.AppTest
+// [ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.01 s <<< FAILURE! - in com.example.AppTest
+// [INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.01 s - in com.example.AppTest
+var mavenTestClassRe = regexp.MustCompile(`(?:INFO|ERROR)\]\s+Tests run:\s*(\d+),\s*Failures:\s*(\d+),\s*Errors:\s*(\d+),\s*Skipped:\s*(\d+).*?(?:in\s+(\S+))`)
+
+// Maven individual test failure:
+// [ERROR]   AppTest.testSomething:25 expected: <1> but was: <2>
+var mavenTestFailRe = regexp.MustCompile(`\[ERROR\]\s+(\w+)\.(\w+):(\d+)\s+(.+)$`)
+
+func parseMavenTestOutput(output string) []TestEntry {
+	lines := strings.Split(output, "\n")
+	var entries []TestEntry
+
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+
+		// Parse individual test failures
+		if m := mavenTestFailRe.FindStringSubmatch(line); m != nil {
+			lineNum, _ := strconv.Atoi(m[3])
+			entries = append(entries, TestEntry{
+				Name:    m[1] + "." + m[2],
+				Status:  "fail",
+				Line:    lineNum,
+				Message: m[4],
+			})
+			continue
+		}
+
+		// Parse test class results
+		if m := mavenTestClassRe.FindStringSubmatch(line); m != nil {
+			failures, _ := strconv.Atoi(m[2])
+			errors, _ := strconv.Atoi(m[3])
+			skipped, _ := strconv.Atoi(m[4])
+			className := ""
+			if len(m) > 5 {
+				className = m[5]
+			}
+			// Only add a pass entry if there were no failures/errors already added for this class
+			if failures == 0 && errors == 0 && className != "" {
+				status := "pass"
+				if skipped > 0 {
+					status = "skip"
+				}
+				entries = append(entries, TestEntry{
+					Name:   className,
+					Status: status,
+				})
+			}
+		}
+	}
+	return entries
+}
+
+// Gradle test output patterns:
+// com.example.AppTest > testSomething PASSED
+// com.example.AppTest > testOther FAILED
+// com.example.AppTest > testSkip SKIPPED
+var gradleTestResultRe = regexp.MustCompile(`^(\S+)\s+>\s+(\S+)\s+(PASSED|FAILED|SKIPPED)$`)
+
+func parseGradleTestOutput(output string) []TestEntry {
+	lines := strings.Split(output, "\n")
+	var entries []TestEntry
+
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		// Strip leading whitespace for matching
+		trimmed := strings.TrimSpace(line)
+
+		if m := gradleTestResultRe.FindStringSubmatch(trimmed); m != nil {
+			status := "pass"
+			switch m[3] {
+			case "FAILED":
+				status = "fail"
+			case "SKIPPED":
+				status = "skip"
+			}
+			entries = append(entries, TestEntry{
+				Name:   m[1] + "." + m[2],
+				Status: status,
+			})
+		}
+	}
+	return entries
+}
+
 // Generic: look for common PASS/FAIL patterns
 var genericPassRe = regexp.MustCompile(`(?i)(PASS|OK|SUCCESS)`)
 var genericFailRe = regexp.MustCompile(`(?i)(FAIL|ERROR|FAILURE)`)
@@ -418,6 +533,34 @@ func colorizeTestLine(line string) string {
 	}
 	if strings.HasSuffix(trimmed, "... ignored") {
 		return "[yellow]" + line + "[-]"
+	}
+
+	// Maven
+	if strings.Contains(trimmed, "BUILD SUCCESS") {
+		return "[green]" + line + "[-]"
+	}
+	if strings.Contains(trimmed, "BUILD FAILURE") {
+		return "[red]" + line + "[-]"
+	}
+	if strings.HasPrefix(trimmed, "[ERROR]") {
+		return "[red]" + line + "[-]"
+	}
+	if strings.HasPrefix(trimmed, "[WARNING]") {
+		return "[yellow]" + line + "[-]"
+	}
+
+	// Gradle
+	if strings.HasSuffix(trimmed, "PASSED") {
+		return "[green]" + line + "[-]"
+	}
+	if strings.HasSuffix(trimmed, "FAILED") {
+		return "[red]" + line + "[-]"
+	}
+	if strings.HasSuffix(trimmed, "SKIPPED") {
+		return "[yellow]" + line + "[-]"
+	}
+	if strings.Contains(trimmed, "BUILD SUCCESSFUL") {
+		return "[green]" + line + "[-]"
 	}
 
 	return line

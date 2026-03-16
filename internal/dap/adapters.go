@@ -48,6 +48,23 @@ func AdapterForFile(filePath string) *AdapterConfig {
 				LanguageID: "c",
 			}
 		}
+	case ".java":
+		if _, err := exec.LookPath("java"); err == nil {
+			return &AdapterConfig{
+				Command:    "java",
+				Args:       []string{"-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005"},
+				LanguageID: "java",
+			}
+		}
+	case ".kt", ".kts":
+		// Kotlin uses the same JVM debugger
+		if _, err := exec.LookPath("java"); err == nil {
+			return &AdapterConfig{
+				Command:    "java",
+				Args:       []string{"-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=5005"},
+				LanguageID: "kotlin",
+			}
+		}
 	}
 	return nil
 }
