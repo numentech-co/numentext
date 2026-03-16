@@ -36,6 +36,14 @@ func New() *Panel {
 }
 
 // SetOnChange sets a callback when content changes (true = has content, false = empty)
+// RefreshColors re-applies theme colors.
+func (p *Panel) RefreshColors() {
+	p.SetBackgroundColor(ui.ColorOutputBg)
+	p.SetTextColor(ui.ColorTextWhite)
+	p.SetTitleColor(ui.ColorPanelBlurred)
+	p.SetBorderColor(ui.ColorBorder)
+}
+
 func (p *Panel) SetOnChange(fn func(hasContent bool)) {
 	p.onChange = fn
 }

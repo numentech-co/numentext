@@ -127,6 +127,14 @@ func (ft *FileTree) addChildren(parent *tview.TreeNode, path string) {
 }
 
 
+// RefreshColors re-applies theme colors to the file tree widget.
+func (ft *FileTree) RefreshColors() {
+	ft.SetBackgroundColor(ui.ColorBg)
+	ft.SetGraphicsColor(ui.ColorBorder)
+	ft.SetBorderColor(ui.ColorBorder)
+	ft.SetTitleColor(ui.ColorPanelBlurred)
+}
+
 // Refresh reloads the file tree
 func (ft *FileTree) Refresh() {
 	root := ft.createNode(ft.rootPath, filepath.Base(ft.rootPath), true)

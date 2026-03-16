@@ -412,26 +412,10 @@ func (a *App) setupMenus() {
 				a.fileTree.Refresh()
 				_ = a.config.Save()
 			}},
-			{Label: "Theme: Borland", Action: func() {
-				a.config.Theme = "borland"
-				ui.ApplyTheme("borland")
-				_ = a.config.Save()
-			}},
-			{Label: "Theme: Modern Dark", Action: func() {
-				a.config.Theme = "modern-dark"
-				ui.ApplyTheme("modern-dark")
-				_ = a.config.Save()
-			}},
-			{Label: "Theme: Modern Light", Action: func() {
-				a.config.Theme = "modern-light"
-				ui.ApplyTheme("modern-light")
-				_ = a.config.Save()
-			}},
-			{Label: "Theme: Solarized Dark", Action: func() {
-				a.config.Theme = "solarized-dark"
-				ui.ApplyTheme("solarized-dark")
-				_ = a.config.Save()
-			}},
+			{Label: "Theme: Borland", Action: func() { a.applyTheme("borland") }},
+			{Label: "Theme: Modern Dark", Action: func() { a.applyTheme("modern-dark") }},
+			{Label: "Theme: Modern Light", Action: func() { a.applyTheme("modern-light") }},
+			{Label: "Theme: Solarized Dark", Action: func() { a.applyTheme("solarized-dark") }},
 			{Label: "Language Tools", Accel: 'l', Action: a.showLanguageTools},
 			{Label: "Python Environment", Accel: 'p', Action: a.showPythonEnvDialog},
 			{Label: "Formatters/Linters", Accel: 'r', Action: a.showToolsConfig},
@@ -3242,6 +3226,21 @@ func convertSymbols(symbols []lsp.DocumentSymbol) []editor.BreadcrumbSymbol {
 }
 
 // applyBorderStyle sets tview global border characters based on UI style.
+// applyTheme switches the color theme and refreshes all panel colors.
+func (a *App) applyTheme(name string) {
+	a.config.Theme = name
+	ui.ApplyTheme(name)
+	_ = a.config.Save()
+
+	// Refresh colors on all panels
+	a.fileTree.RefreshColors()
+	a.output.RefreshColors()
+	a.menuBar.SetBackgroundColor(ui.ColorMenuBg)
+	a.statusBar.SetBackgroundColor(ui.ColorStatusBg)
+	a.editor.SetBackgroundColor(ui.ColorBg)
+	a.fileTree.Refresh()
+}
+
 func (a *App) applyBorderStyle() {
 	if a.config.UIStyle == "classic" {
 		tview.Borders.Horizontal = '-'
