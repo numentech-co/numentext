@@ -219,7 +219,7 @@ func (mb *MenuBar) drawDropdown(screen tcell.Screen, startX, startY int) {
 
 		// Check for separator
 		if item.Label == "---" {
-			sepStyle := tcell.StyleDefault.Foreground(ColorMenuShortcut).Background(ColorMenuDropBg)
+			sepStyle := tcell.StyleDefault.Foreground(ColorBorder).Background(ColorMenuDropBg)
 			sepCh := Style.MenuSeparator()
 			if Style.Modern {
 				screen.SetContent(dropX-1, iy, '\u251c', nil, sepStyle) // ├
