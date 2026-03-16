@@ -171,6 +171,7 @@ func NewEditor() *Editor {
 		keyMode:         keymode.NewDefaultMode(),
 	}
 	e.SetBorder(false)
+	e.SetBackgroundColor(ui.ColorBg)
 	return e
 }
 
