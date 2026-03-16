@@ -17,6 +17,7 @@ import (
 	"numentext/internal/editor"
 	"numentext/internal/editor/keymode"
 	"numentext/internal/filetree"
+	"numentext/internal/hexview"
 	"numentext/internal/lsp"
 	"numentext/internal/output"
 	"numentext/internal/runner"
@@ -64,6 +65,10 @@ type App struct {
 	buildErrors      []runner.BuildError
 	buildErrorIdx    int  // current error index (0-based), -1 if none
 	navigatingErrors bool // true while jumping to an error (suppresses clear)
+
+	// Hex view
+	hexView     *hexview.HexView // active hex view (nil when in text editor mode)
+	hexViewMode bool             // true when hex view is displayed instead of editor
 }
 
 func New() *App {
@@ -140,10 +145,7 @@ func (a *App) setupUI() {
 	})
 
 	a.fileTree.SetOnFileOpen(func(path string) {
-		err := a.editor.OpenFile(path)
-		if err != nil {
-			a.output.AppendError("Error opening file: " + err.Error())
-		}
+		a.openFileSmartDetect(path)
 		a.focusPanel("editor")
 	})
 
@@ -207,6 +209,16 @@ func (a *App) setupMenus() {
 			{Label: "Copy", Shortcut: "Ctrl+C", Action: func() { a.editor.HandleAction(editor.ActionCopy, 0) }},
 			{Label: "Paste", Shortcut: "Ctrl+V", Action: func() { a.editor.HandleAction(editor.ActionPaste, 0) }},
 			{Label: "Select All", Shortcut: "Ctrl+A", Accel: 'a', Action: func() { a.editor.HandleAction(editor.ActionSelectAll, 0) }},
+		},
+	}
+
+	// View menu
+	viewMenu := &ui.Menu{
+		Label: "View",
+		Accel: 'v',
+		Items: []*ui.MenuItem{
+			{Label: "Open as Hex", Accel: 'h', Action: a.openCurrentAsHex},
+			{Label: "Open as Text", Accel: 't', Action: a.openCurrentAsText},
 		},
 	}
 
@@ -373,6 +385,7 @@ func (a *App) setupMenus() {
 
 	a.menuBar.AddMenu(fileMenu)
 	a.menuBar.AddMenu(editMenu)
+	a.menuBar.AddMenu(viewMenu)
 	a.menuBar.AddMenu(searchMenu)
 	a.menuBar.AddMenu(runMenu)
 	a.menuBar.AddMenu(debugMenu)
@@ -418,11 +431,12 @@ func (a *App) buildFileMenuItems() []*ui.MenuItem {
 }
 
 func (a *App) openRecentFile(path string) {
-	err := a.editor.OpenFile(path)
-	if err != nil {
-		a.output.AppendError("Error opening file: " + err.Error())
+	a.openFileSmartDetect(path)
+	if a.hexViewMode {
+		a.tviewApp.SetFocus(a.hexView)
+	} else {
+		a.tviewApp.SetFocus(a.editor)
 	}
-	a.tviewApp.SetFocus(a.editor)
 }
 
 func (a *App) setupKeybindings() {
@@ -519,6 +533,8 @@ func (a *App) setupKeybindings() {
 			case 's':
 				if shift {
 					a.saveFileAs()
+				} else if a.hexViewMode {
+					a.saveHexView()
 				} else {
 					a.saveFile()
 				}
@@ -547,7 +563,11 @@ func (a *App) setupKeybindings() {
 				}
 				return nil
 			case 'g':
-				a.showGoToLine()
+				if a.hexViewMode {
+					a.showGoToAddress()
+				} else {
+					a.showGoToLine()
+				}
 				return nil
 			case 'h':
 				a.showReplace()
@@ -569,15 +589,24 @@ func (a *App) setupKeybindings() {
 		case tcell.KeyEscape:
 			if a.menuBar.IsOpen() {
 				a.menuBar.Close()
-				a.focusPanel("editor")
+				if a.hexViewMode {
+					a.tviewApp.SetFocus(a.hexView)
+				} else {
+					a.focusPanel("editor")
+				}
 				return nil
 			}
 			if hasDialog {
 				// Let the dialog handle Escape
 				return event
 			}
-			// Return focus to editor from file tree/output/terminal
-			a.focusPanel("editor")
+			// Return focus to editor/hex view from file tree/output/terminal
+			if a.hexViewMode {
+				a.tviewApp.SetFocus(a.hexView)
+				a.statusBar.SetFocusedPanel("Hex View")
+			} else {
+				a.focusPanel("editor")
+			}
 			return nil
 		case tcell.KeyF6:
 			a.debugContinue()
@@ -823,14 +852,22 @@ func (a *App) focusPanel(name string) {
 	case "filetree":
 		a.tviewApp.SetFocus(a.fileTree)
 	case "editor":
-		a.tviewApp.SetFocus(a.editor)
+		if a.hexViewMode && a.hexView != nil {
+			a.tviewApp.SetFocus(a.hexView)
+		} else {
+			a.tviewApp.SetFocus(a.editor)
+		}
 	case "output":
 		a.tviewApp.SetFocus(a.output)
 	case "terminal":
 		a.tviewApp.SetFocus(a.termPanel)
 	}
 	a.updatePanelBorders()
-	a.statusBar.SetFocusedPanel(panelDisplayName(name))
+	displayName := panelDisplayName(name)
+	if name == "editor" && a.hexViewMode {
+		displayName = "Hex View"
+	}
+	a.statusBar.SetFocusedPanel(displayName)
 }
 
 // updatePanelBorders adjusts title colors to highlight the focused panel.
@@ -874,6 +911,10 @@ func (a *App) nextPanel() {
 }
 
 func (a *App) updateStatusBar() {
+	if a.hexViewMode && a.hexView != nil {
+		a.updateHexStatusBar()
+		return
+	}
 	tab := a.editor.ActiveTab()
 	if tab != nil {
 		a.statusBar.Update(tab.Name, tab.CursorRow, tab.CursorCol, tab.Highlighter.Language(), tab.Buffer.Modified())
@@ -891,6 +932,152 @@ func (a *App) updateStatusBar() {
 	// Update mode indicator
 	km := a.editor.KeyMode()
 	a.statusBar.SetModeInfo(km.SubModeLabel(), km.PendingDisplay())
+}
+
+// --- Hex View ---
+
+// openFileSmartDetect opens a file, auto-detecting binary files and opening them in hex view.
+func (a *App) openFileSmartDetect(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		a.output.AppendError("Error opening file: " + err.Error())
+		return
+	}
+
+	if hexview.IsBinaryData(data) {
+		a.showHexView(path, data)
+	} else {
+		// If currently in hex view mode, switch back to text editor
+		if a.hexViewMode {
+			a.hideHexView()
+		}
+		if err := a.editor.OpenFile(path); err != nil {
+			a.output.AppendError("Error opening file: " + err.Error())
+		}
+	}
+}
+
+// showHexView switches the editor area to show a hex view of the given file data.
+func (a *App) showHexView(filePath string, data []byte) {
+	hv := hexview.New(filePath, data)
+	hv.SetOnChange(func() {
+		a.updateStatusBar()
+	})
+	hv.SetOnGoToAddress(func() {
+		a.showGoToAddress()
+	})
+
+	a.hexView = hv
+	a.hexViewMode = true
+
+	// Replace the editor in the layout with the hex view
+	a.layout.Editor = hv
+	a.layout.RebuildMainFlex()
+	a.tviewApp.SetFocus(hv)
+	a.updateStatusBar()
+	a.statusBar.SetFocusedPanel("Hex View")
+}
+
+// hideHexView switches back from hex view to the text editor.
+func (a *App) hideHexView() {
+	if !a.hexViewMode {
+		return
+	}
+	a.hexViewMode = false
+	a.hexView = nil
+
+	// Restore the editor in the layout
+	a.layout.Editor = a.editor
+	a.layout.RebuildMainFlex()
+	a.tviewApp.SetFocus(a.editor)
+	a.updateStatusBar()
+	a.statusBar.SetFocusedPanel("Editor")
+}
+
+// openCurrentAsHex opens the current editor file in hex view (View > Open as Hex).
+func (a *App) openCurrentAsHex() {
+	if a.hexViewMode {
+		a.statusBar.SetMessage("Already in hex view")
+		return
+	}
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		a.statusBar.SetMessage("No file open")
+		return
+	}
+	data, err := os.ReadFile(tab.FilePath)
+	if err != nil {
+		a.output.AppendError("Error reading file: " + err.Error())
+		return
+	}
+	a.showHexView(tab.FilePath, data)
+}
+
+// openCurrentAsText switches from hex view back to text editor view (View > Open as Text).
+func (a *App) openCurrentAsText() {
+	if !a.hexViewMode {
+		a.statusBar.SetMessage("Already in text view")
+		return
+	}
+	filePath := a.hexView.FilePath()
+	a.hideHexView()
+	if filePath != "" {
+		if err := a.editor.OpenFile(filePath); err != nil {
+			a.output.AppendError("Error opening file as text: " + err.Error())
+		}
+	}
+}
+
+// showGoToAddress shows the Go to Address dialog for hex view.
+func (a *App) showGoToAddress() {
+	if !a.hexViewMode || a.hexView == nil {
+		return
+	}
+	dialog := ui.GoToAddressDialog(a.tviewApp, func(result ui.DialogResult) {
+		a.layout.HideDialog("gotoaddr")
+		if result.Confirmed {
+			text := strings.TrimPrefix(strings.TrimPrefix(result.Text, "0x"), "0X")
+			offset, err := strconv.ParseInt(text, 16, 64)
+			if err == nil {
+				a.hexView.GoToOffset(int(offset))
+			} else {
+				a.statusBar.SetMessage("Invalid hex address")
+			}
+		}
+		a.tviewApp.SetFocus(a.hexView)
+	})
+	a.layout.ShowDialog("gotoaddr", dialog)
+}
+
+// updateHexStatusBar updates the status bar for hex view mode.
+func (a *App) updateHexStatusBar() {
+	if a.hexView == nil {
+		return
+	}
+	parts := strings.Split(a.hexView.FilePath(), "/")
+	name := parts[len(parts)-1]
+	mode := "OVR"
+	if a.hexView.InsertMode() {
+		mode = "INS"
+	}
+	pane := a.hexView.FocusPane()
+	msg := fmt.Sprintf("Offset: %08X | Size: %d bytes | %s | Pane: %s",
+		a.hexView.Cursor(), a.hexView.DataSize(), mode, pane)
+	a.statusBar.Update(name, 0, 0, "Hex", a.hexView.Modified())
+	a.statusBar.SetMessage(msg)
+	a.statusBar.SetModeInfo("", "")
+}
+
+// saveHexView saves the hex view data.
+func (a *App) saveHexView() {
+	if !a.hexViewMode || a.hexView == nil {
+		return
+	}
+	if err := a.hexView.Save(); err != nil {
+		a.output.AppendError("Error saving hex file: " + err.Error())
+	} else {
+		a.statusBar.SetMessage("Hex file saved")
+	}
 }
 
 // showCommandPalette opens the command palette overlay.
@@ -980,11 +1167,8 @@ func (a *App) OpenFileByPath(filePath string) {
 	if err != nil {
 		absPath = filePath
 	}
-	if err := a.editor.OpenFile(absPath); err != nil {
-		a.output.AppendError("Error opening " + filePath + ": " + err.Error())
-	} else {
-		a.config.AddRecentFile(absPath)
-	}
+	a.openFileSmartDetect(absPath)
+	a.config.AddRecentFile(absPath)
 }
 
 // Actions
@@ -997,15 +1181,15 @@ func (a *App) openFile() {
 	dialog := ui.OpenFileDialog(a.tviewApp, a.workDir, func(result ui.DialogResult) {
 		a.layout.HideDialog("open")
 		if result.Confirmed {
-			err := a.editor.OpenFile(result.FilePath)
-			if err != nil {
-				a.output.AppendError("Error opening file: " + err.Error())
-			} else {
-				a.config.AddRecentFile(result.FilePath)
-				_ = a.config.Save()
-			}
+			a.openFileSmartDetect(result.FilePath)
+			a.config.AddRecentFile(result.FilePath)
+			_ = a.config.Save()
 		}
-		a.tviewApp.SetFocus(a.editor)
+		if a.hexViewMode {
+			a.tviewApp.SetFocus(a.hexView)
+		} else {
+			a.tviewApp.SetFocus(a.editor)
+		}
 	})
 	a.layout.ShowDialog("open", dialog)
 }
@@ -1280,6 +1464,23 @@ func (a *App) applyLSPEdits(tab *editor.Tab, edits []lsp.TextEdit) {
 }
 
 func (a *App) closeTab() {
+	// If in hex view mode, close the hex view and return to editor
+	if a.hexViewMode && a.hexView != nil {
+		if a.hexView.Modified() {
+			dialog := ui.ConfirmDialog(a.tviewApp, "Save changes to hex file?", func(yes bool) {
+				a.layout.HideDialog("confirm")
+				if yes {
+					a.saveHexView()
+				}
+				a.hideHexView()
+			})
+			a.layout.ShowDialog("confirm", dialog)
+		} else {
+			a.hideHexView()
+		}
+		return
+	}
+
 	tab := a.editor.ActiveTab()
 	if tab == nil {
 		return

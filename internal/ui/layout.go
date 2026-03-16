@@ -148,3 +148,8 @@ func (l *Layout) rebuildMainFlex() {
 	l.MainGrid.AddItem(l.Output, l.outputHeight, 0, false)
 	l.MainGrid.AddItem(l.StatusBar, 1, 0, false)
 }
+
+// RebuildMainFlex forces a layout rebuild (e.g. when swapping the editor for hex view).
+func (l *Layout) RebuildMainFlex() {
+	l.rebuildMainFlex()
+}

@@ -418,3 +418,37 @@ Press Escape to close
 
 	return wrapDialogWithShadow(text, 45, 16)
 }
+
+// GoToAddressDialog creates a go-to-address dialog for hex view (accepts hex offset).
+func GoToAddressDialog(app *tview.Application, onResult func(DialogResult)) tview.Primitive {
+	form := tview.NewForm()
+	form.SetBackgroundColor(ColorDialogBg)
+	form.SetFieldBackgroundColor(ColorBg)
+	form.SetFieldTextColor(ColorTextWhite)
+	form.SetButtonBackgroundColor(ColorMenuHighlight)
+	form.SetButtonTextColor(ColorTextWhite)
+	form.SetLabelColor(ColorStatusText)
+	form.SetBorder(true)
+	form.SetBorderColor(ColorStatusText)
+	setModernTitle(form, "Go to Address")
+	form.SetTitleColor(ColorStatusText)
+
+	form.AddInputField("Hex offset:", "", 20, nil, nil)
+	form.AddButton("Go", func() {
+		text := form.GetFormItemByLabel("Hex offset:").(*tview.InputField).GetText()
+		onResult(DialogResult{Confirmed: true, Text: text})
+	})
+	form.AddButton("Cancel", func() {
+		onResult(DialogResult{Confirmed: false})
+	})
+
+	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			onResult(DialogResult{Confirmed: false})
+			return nil
+		}
+		return event
+	})
+
+	return wrapDialogWithShadow(form, 45, 7)
+}
