@@ -29,6 +29,10 @@ type Tab struct {
 	SelectStart [2]int // row, col (-1 = no selection)
 	SelectEnd   [2]int
 	HasSelect   bool
+
+	// Git diff markers: 0-based line number -> change type
+	DiffMarkers   map[int]DiffChangeType
+	DiffAllAdded  bool // true if file is untracked (all lines are added)
 }
 
 // Editor is the core editor component
@@ -577,6 +581,56 @@ func (e *Editor) SaveAs(filePath string) error {
 	tab.Name = parts[len(parts)-1]
 	tab.Highlighter.DetectLanguage(filePath)
 	return e.SaveCurrentFile()
+}
+
+// RefreshDiffMarkers updates git diff markers for the active tab.
+// This should be called after save and after file open.
+func (e *Editor) RefreshDiffMarkers() {
+	tab := e.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return
+	}
+	markers, err := DiffMarkers(tab.FilePath)
+	if err != nil && err.Error() == "untracked" {
+		tab.DiffMarkers = nil
+		tab.DiffAllAdded = true
+		return
+	}
+	tab.DiffMarkers = markers
+	tab.DiffAllAdded = false
+}
+
+// RefreshDiffMarkersForTab updates git diff markers for a specific tab by file path.
+func (e *Editor) RefreshDiffMarkersForTab(filePath string) {
+	for _, tab := range e.tabs {
+		if tab.FilePath == filePath {
+			markers, err := DiffMarkers(filePath)
+			if err != nil && err.Error() == "untracked" {
+				tab.DiffMarkers = nil
+				tab.DiffAllAdded = true
+				return
+			}
+			tab.DiffMarkers = markers
+			tab.DiffAllAdded = false
+			return
+		}
+	}
+}
+
+// GetCurrentFileDiff returns the raw git diff output for the current file.
+func (e *Editor) GetCurrentFileDiff() (string, error) {
+	tab := e.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		return "", fmt.Errorf("no file open")
+	}
+	diff, err := RunGitDiff(tab.FilePath)
+	if err != nil {
+		if err.Error() == "untracked" {
+			return "", fmt.Errorf("file is not tracked by git")
+		}
+		return "", err
+	}
+	return diff, nil
 }
 
 // ReloadCurrentFile re-reads the active tab's file from disk into the buffer.
@@ -1595,53 +1649,7 @@ func (e *Editor) Draw(screen tcell.Screen) {
 
 		// Draw gutter
 		if e.showLineNumbers {
-			gutterStr := FormatGutterLine(lineIdx+1, tab.Buffer.LineCount())
-			gutterStyle := tcell.StyleDefault.Foreground(ui.ColorGutterText).Background(ui.ColorGutterBg)
-
-			// Check for breakpoint marker on this line
-			if e.hasBreakpoint != nil && tab.FilePath != "" && e.hasBreakpoint(tab.FilePath, lineIdx+1) {
-				screen.SetContent(x, y+row, '*', nil,
-					tcell.StyleDefault.Foreground(tcell.ColorRed).Background(ui.ColorGutterBg).Bold(true))
-				for i, ch := range gutterStr {
-					if i > 0 && x+i < x+gutterW {
-						screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
-					}
-				}
-				goto gutterDone
-			}
-
-			// Check for diagnostic marker on this line (build errors take precedence over LSP)
-			if tab.FilePath != "" {
-				diag, hasDiag := DiagnosticInfo{}, false
-				if bd, ok := e.buildDiags[tab.FilePath]; ok {
-					diag, hasDiag = bd[lineIdx]
-				}
-				if !hasDiag {
-					if ld, ok := e.diagnostics[tab.FilePath]; ok {
-						diag, hasDiag = ld[lineIdx]
-					}
-				}
-				if hasDiag {
-					markerCh, markerFg := diagnosticMarker(diag.Severity)
-					// Draw marker in first gutter column
-					screen.SetContent(x, y+row, markerCh, nil,
-						tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg).Bold(true))
-					// Draw rest of gutter (line number) starting at position 1
-					for i, ch := range gutterStr {
-						if i > 0 && x+i < x+gutterW {
-							screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
-						}
-					}
-					goto gutterDone
-				}
-			}
-
-			for i, ch := range gutterStr {
-				if x+i < x+gutterW {
-					screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
-				}
-			}
-		gutterDone:
+			e.drawGutterForLine(screen, x, y+row, gutterW, lineIdx, tab)
 		}
 
 		// Draw line content with syntax highlighting
@@ -2023,6 +2031,25 @@ func (e *Editor) drawGutterForLine(screen tcell.Screen, x, y, gutterW, lineIdx i
 			}
 			return
 		}
+	}
+
+	// Check for git diff marker
+	diffType, hasDiff := DiffChangeType(0), false
+	if tab.DiffAllAdded {
+		diffType, hasDiff = DiffAdded, true
+	} else if tab.DiffMarkers != nil {
+		diffType, hasDiff = tab.DiffMarkers[lineIdx]
+	}
+	if hasDiff {
+		markerCh, markerFg := diffMarkerChar(diffType)
+		screen.SetContent(x, y, markerCh, nil,
+			tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorGutterBg))
+		for i, ch := range gutterStr {
+			if i > 0 && x+i < x+gutterW {
+				screen.SetContent(x+i, y, ch, nil, gutterStyle)
+			}
+		}
+		return
 	}
 
 	for i, ch := range gutterStr {
