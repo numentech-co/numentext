@@ -1,0 +1,618 @@
+{
+  "epics": [
+    {
+      "id": "18",
+      "title": "Regex Search and Multi-File Replace",
+      "description": "Extend the existing Find/Replace dialogs with regex support using Go's regexp package, and add the ability to search and replace across all open files.",
+      "user_stories": [
+        {
+          "id": "18.1",
+          "title": "Regex toggle in Find dialog",
+          "description": "Add a checkbox/toggle to the Find dialog to switch between literal and regex mode. Use Go's regexp package. Highlight all matches in the editor when regex is active. Invalid regex patterns should show an error in the status bar rather than crashing.",
+          "complexity": "Medium",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the Find dialog is open, when the user presses the regex toggle key or clicks the regex checkbox, then the search mode switches between literal and regex and the toggle state is visually indicated.",
+            "Given regex mode is active and a valid regex pattern is entered, when the user searches, then all matches in the current file are highlighted in the editor.",
+            "Given regex mode is active and an invalid regex pattern is entered, when the user attempts to search, then an error message describing the regex syntax error is shown in the status bar.",
+            "Given regex mode is active and a pattern with capturing groups like '(\\w+)\\.(\\w+)' is entered, when the user searches, then matches are found correctly respecting the group structure.",
+            "Given regex mode is active and the case-insensitive flag '(?i)' is included in the pattern, when the user searches, then matches are found regardless of case.",
+            "Given literal mode is active, when the user searches for a string containing regex metacharacters like '.*+?', then the search treats them as literal characters and behavior is unchanged from the existing implementation.",
+            "Given regex mode was previously toggled on, when the user closes and reopens the Find dialog, then the regex toggle state is preserved for the session.",
+            "Given regex mode is active with a valid pattern, when the user presses F3 or Enter to find next, then the cursor moves to the next match wrapping around at end of file."
+          ]
+        },
+        {
+          "id": "18.2",
+          "title": "Regex in Replace dialog",
+          "description": "Extend the Replace dialog to support regex mode with capture group references ($1, $2, etc.) in the replacement string. Preview the replacement result before applying.",
+          "complexity": "Medium",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given regex mode is active in the Replace dialog and the search pattern contains capturing groups, when the user types $1 or $2 in the replacement field, then the replacement uses the corresponding captured text from the match.",
+            "Given regex mode is active and the user clicks 'Replace All', when multiple matches exist in the file, then all matches are replaced with the regex-expanded replacement string and the count of replacements is shown.",
+            "Given text is selected in the editor and the user opens Replace with regex mode, when 'Replace in Selection' is chosen, then only matches within the selected region are replaced.",
+            "Given regex mode is active and a replacement string contains a literal '$1' that should not be interpreted, when the user escapes it as '$$1', then the literal text '$1' is inserted.",
+            "Given the Replace dialog is open with regex mode, when the user enters a replacement and the first match is shown, then a preview of what the replacement will produce is displayed before the user confirms.",
+            "Given regex mode is active and the replacement is applied, when the user presses Ctrl+Z, then the replacement is undone restoring the original text."
+          ]
+        },
+        {
+          "id": "18.3",
+          "title": "Search/Replace across all open files",
+          "description": "Extend search to operate across all open editor tabs. Show results grouped by file with line numbers. Support replace all across files with a confirmation step.",
+          "complexity": "High",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given multiple files are open in tabs and the user triggers 'Search All Open Files', when a search term is entered, then results are displayed in a panel grouped by filename with line numbers and matching text shown.",
+            "Given search results are displayed grouped by file, when the user clicks or selects a result entry, then the editor switches to that file's tab and positions the cursor at the matching line and column.",
+            "Given the user triggers 'Replace All in Open Files' with a search and replacement term, when matches exist across multiple files, then a confirmation dialog shows the total count of matches across N files before applying.",
+            "Given the user confirms a cross-file replace all, when the replacements are applied, then each file's buffer is modified independently and each file's undo history records the change so Ctrl+Z works per-file.",
+            "Given the user performs a cross-file replace and then switches to an affected tab, when the user presses Ctrl+Z, then only that file's replacements are undone leaving other files' replacements intact.",
+            "Given regex mode is active during cross-file search, when the search pattern contains capture groups, then results across all files respect the regex pattern and replacements expand capture references correctly.",
+            "Given a cross-file search returns zero results, when the search completes, then the status bar or results panel shows 'No matches found across open files'.",
+            "Given the user modifies a file after a cross-file search, when the results panel is still open, then stale results are visually indicated or the user is prompted to re-search."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "19",
+      "title": "Line Endings and Encoding",
+      "description": "Detect and preserve file line endings (LF, CRLF, CR), handle UTF-8 BOM, and provide tab/space conversion utilities.",
+      "user_stories": [
+        {
+          "id": "19.1",
+          "title": "Detect and preserve line endings",
+          "description": "On file open, detect whether the file uses \\r\\n (Windows/CRLF), \\r (old Mac/CR), or \\n (Unix/LF) line endings. Store the detected format per-tab and write back in the original format on save. Show the current line ending style in the status bar and allow changing it.",
+          "complexity": "Medium",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given a file with CRLF line endings is opened, when the file is saved without changes, then the saved file retains CRLF line endings byte-for-byte.",
+            "Given a file with LF line endings is opened, when the file is saved, then the saved file retains LF line endings.",
+            "Given a file is open, when the user looks at the status bar, then the current line ending format is displayed as 'LF', 'CRLF', or 'CR'.",
+            "Given the user selects a different line ending format via the Edit menu or status bar click, when the conversion is applied, then the entire buffer is converted to the new line ending style and the status bar updates.",
+            "Given a new file is created, when no line ending preference is configured, then the file defaults to the platform's native line ending (LF on Unix/macOS, CRLF on Windows).",
+            "Given a file with mixed line endings is opened, when the detection runs, then the most frequently occurring line ending style is chosen and the status bar displays it."
+          ]
+        },
+        {
+          "id": "19.2",
+          "title": "UTF-8 BOM handling",
+          "description": "Detect the UTF-8 BOM (0xEF 0xBB 0xBF) at the start of a file on open. Preserve it on save if present. Show a 'BOM' indicator in the status bar. Allow toggling BOM via the Edit menu.",
+          "complexity": "Low",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given a file with a UTF-8 BOM is opened, when the file contents are displayed in the editor, then the BOM bytes are not rendered as visible characters.",
+            "Given a file with a UTF-8 BOM is opened and saved without changes, when the saved file is inspected, then the BOM bytes (0xEF 0xBB 0xBF) are preserved at the start of the file.",
+            "Given a file with a UTF-8 BOM is open, when the user looks at the status bar, then a 'BOM' indicator is visible.",
+            "Given the user selects 'Toggle BOM' from the Edit menu on a file without a BOM, when the file is saved, then the BOM bytes are prepended to the file.",
+            "Given the user selects 'Toggle BOM' from the Edit menu on a file with a BOM, when the file is saved, then the BOM bytes are removed from the file.",
+            "Given a new file is created, when it is saved for the first time, then no BOM is added by default."
+          ]
+        },
+        {
+          "id": "19.3",
+          "title": "Tab/space conversion",
+          "description": "Add Edit menu items for converting between tabs and spaces. Use the configured tab size for conversion. Operate on the selection if text is selected, or the entire file otherwise.",
+          "complexity": "Low",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given the user selects 'Convert Tabs to Spaces' from the Edit menu with no selection, when the conversion runs, then every tab character in the file is replaced with the configured number of spaces (e.g., 4 spaces for tabSize=4).",
+            "Given the user selects 'Convert Spaces to Tabs' from the Edit menu with no selection, when the conversion runs, then every run of consecutive spaces equal to tabSize is replaced with a single tab character.",
+            "Given text is selected and the user selects 'Convert Tabs to Spaces', when the conversion runs, then only tabs within the selected region are converted to spaces.",
+            "Given text is selected and the user selects 'Convert Spaces to Tabs', when the conversion runs, then only matching space runs within the selected region are converted to tabs.",
+            "Given the user performs a tab-to-space conversion, when the user presses Ctrl+Z, then the conversion is undone and the original tabs are restored.",
+            "Given the tab size is configured to 2 in settings, when 'Convert Tabs to Spaces' is run, then each tab is replaced with exactly 2 spaces."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "20",
+      "title": "File Bookmarks",
+      "description": "Allow users to set bookmarks on lines within files, navigate between them, and view all bookmarks in a central panel.",
+      "user_stories": [
+        {
+          "id": "20.1",
+          "title": "Toggle bookmark at current line",
+          "description": "Ctrl+F2 toggles a bookmark on the current line. Bookmarks are displayed as a marker in the gutter area. Stored per-file. Clicking the gutter margin at a line also toggles its bookmark.",
+          "complexity": "Medium",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the cursor is on a line with no bookmark, when the user presses Ctrl+F2, then a bookmark marker appears in the gutter for that line.",
+            "Given the cursor is on a line with an existing bookmark, when the user presses Ctrl+F2, then the bookmark marker is removed from the gutter.",
+            "Given a file has bookmarks set, when the user switches to another tab and switches back, then the bookmarks are still present in the gutter.",
+            "Given the editor is displaying line numbers in the gutter, when the user clicks in the gutter area next to a line, then a bookmark is toggled on that line.",
+            "Given a file has both bookmarks and LSP diagnostic markers, when both exist on the same line, then the bookmark marker and diagnostic marker are both visible or combined without one hiding the other.",
+            "Given a file already has 50 bookmarks, when the user tries to add a 51st bookmark, then the bookmark is not added and the status bar shows a message indicating the maximum has been reached."
+          ]
+        },
+        {
+          "id": "20.2",
+          "title": "Navigate bookmarks with F2/Shift+F2",
+          "description": "F2 jumps to the next bookmark in the current file, wrapping around at the end. Shift+F2 jumps to the previous bookmark. The status bar shows the current bookmark position.",
+          "complexity": "Low",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given a file has multiple bookmarks and the cursor is above the first bookmark, when the user presses F2, then the cursor jumps to the nearest bookmark below the current line.",
+            "Given a file has multiple bookmarks and the cursor is below the last bookmark, when the user presses F2, then the cursor wraps around and jumps to the first bookmark in the file.",
+            "Given a file has multiple bookmarks and the cursor is below the first bookmark, when the user presses Shift+F2, then the cursor jumps to the nearest bookmark above the current line.",
+            "Given a file has multiple bookmarks and the cursor is above the first bookmark, when the user presses Shift+F2, then the cursor wraps around and jumps to the last bookmark in the file.",
+            "Given the cursor has just jumped to a bookmark, when the status bar is displayed, then it shows 'Bookmark N of M' where N is the current bookmark index and M is the total.",
+            "Given a file has no bookmarks, when the user presses F2, then the status bar shows 'No bookmarks' and the cursor does not move."
+          ]
+        },
+        {
+          "id": "20.3",
+          "title": "Bookmarks panel",
+          "description": "A panel or dialog listing all bookmarks across all open files. Shows filename, line number, and the text content of the bookmarked line. Clicking or selecting an entry jumps to that location.",
+          "complexity": "Medium",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given the user presses Ctrl+Shift+F2, when the bookmarks panel opens, then it shows a list of all bookmarks across all open files.",
+            "Given the bookmarks panel is open, when entries are displayed, then each entry shows the filename, line number, and the text content of the bookmarked line.",
+            "Given the bookmarks panel is open, when the user selects an entry and presses Enter or clicks it, then the editor switches to that file's tab and positions the cursor on the bookmarked line.",
+            "Given the bookmarks panel is open and the user adds a new bookmark in the editor, when the panel is refreshed or re-opened, then the new bookmark appears in the list.",
+            "Given the bookmarks panel is open and the user removes a bookmark in the editor, when the panel is refreshed or re-opened, then the removed bookmark no longer appears in the list.",
+            "Given no bookmarks exist in any open file, when the user opens the bookmarks panel, then the panel shows an empty state message such as 'No bookmarks set'."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "21",
+      "title": "TODO/FIXME Scanner",
+      "description": "Scan source files for comment annotations like TODO, FIXME, BUG, HACK, WONTFIX, XXX, and NOTE, and display them in a navigable panel.",
+      "user_stories": [
+        {
+          "id": "21.1",
+          "title": "Scan comments for annotation tags",
+          "description": "Parse all open files for TODO, FIXME, BUG, HACK, WONTFIX, XXX, and NOTE annotations in comments. Detect single-line comment styles (//, #, --, ;) and multi-line comment blocks (/* */, triple-quoted strings). Extract the tag and the descriptive text following it.",
+          "complexity": "High",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given a Go file contains '// TODO: fix this later', when the scanner runs, then it extracts tag='TODO' and text='fix this later' with the correct file and line number.",
+            "Given a Python file contains '# FIXME: broken logic', when the scanner runs, then it detects the FIXME tag and extracts the description text.",
+            "Given a C file contains '/* BUG: race condition in handler */', when the scanner runs, then it detects the BUG tag inside the multi-line comment syntax.",
+            "Given a file contains 'TODO' followed by either a colon or a space before the description, when the scanner runs, then both separator styles are recognized as valid annotation tags.",
+            "Given a file contains the string 'TODO' inside a string literal like `fmt.Println(\"TODO: not a real todo\")`, when the scanner runs, then the string literal occurrence is ignored and not reported.",
+            "Given a file contains 'todo: lowercase tag', when the scanner runs with case-insensitive matching, then it matches and extracts the tag as 'TODO'.",
+            "Given multiple files are open, when the scanner runs, then annotations from all open files are collected and returned.",
+            "Given a SQL file contains '-- NOTE: index required', when the scanner runs, then it detects the NOTE tag using the SQL single-line comment prefix."
+          ]
+        },
+        {
+          "id": "21.2",
+          "title": "Annotations panel",
+          "description": "A bottom panel showing all detected annotations from open files. Columns include File, Line, Tag, and Description. Clicking an entry jumps to the annotation's location. The panel refreshes when files are saved.",
+          "complexity": "Medium",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given the user presses Ctrl+Shift+A, when annotation data is available, then a panel opens at the bottom showing all detected annotations from all open files.",
+            "Given the annotations panel is open, when entries are displayed, then each entry shows the filename, line number, tag type, and description text.",
+            "Given the annotations panel is open, when the user clicks or selects an entry, then the editor opens the corresponding file tab and jumps to the annotation's line.",
+            "Given the user saves a file that has been modified, when the save completes, then the annotations panel automatically re-scans and refreshes its entries.",
+            "Given the annotations panel is open, when the header or summary row is displayed, then it shows the total count of annotations (e.g., '12 annotations found').",
+            "Given the annotations panel is open, when entries from multiple files are listed, then they are sorted by filename first and then by line number within each file.",
+            "Given the user presses Ctrl+Shift+A while the annotations panel is open, when the toggle fires, then the panel closes.",
+            "Given no annotations exist in any open file, when the panel is opened, then it displays an empty state message such as 'No annotations found'."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "22",
+      "title": "Pre-configured Language Tools",
+      "description": "Ship sensible default tool configurations for common languages and auto-detect which tools are installed on the system.",
+      "user_stories": [
+        {
+          "id": "22.1",
+          "title": "Default tool configurations per language",
+          "description": "Ship built-in default tool configs for common languages: Python (isort, black, flake8, mypy, bandit), Go (gofmt, go vet, staticcheck), Rust (rustfmt, clippy), JavaScript/TypeScript (prettier, eslint), C/C++ (clang-format, clang-tidy). Auto-detect which tools are installed by checking PATH on startup. Only register tools that are found.",
+          "complexity": "Medium",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given a fresh install with no user config and gofmt is in PATH, when the user opens a Go file, then gofmt is automatically registered as the formatter for Go files.",
+            "Given a fresh install with no user config and black and isort are in PATH, when the user opens a Python file, then black and isort are automatically registered as formatters for Python files.",
+            "Given a tool like staticcheck is not installed (not in PATH), when the auto-detection runs, then that tool is silently skipped with no error message or dialog shown to the user.",
+            "Given the user has a custom tool config for Python in their config file, when the defaults are loaded, then the user's config takes precedence and the defaults for Python are not used.",
+            "Given auto-detection has completed, when the user opens the first file of a given language, then the status bar or output panel indicates which tools were auto-detected for that language.",
+            "Given the user adds a custom config for Go tools, when the configuration is loaded, then the default Go tool configs are entirely replaced (not merged) by the user's config."
+          ]
+        },
+        {
+          "id": "22.2",
+          "title": "Tool status in Options menu",
+          "description": "Add an Options > Language Tools menu that shows a per-language list of configured tools with their installed/not-installed status. Allow enabling and disabling individual tools from the menu.",
+          "complexity": "Low",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given the user opens Options > Language Tools, when the menu is displayed, then each supported language is listed with its configured tools shown beneath it.",
+            "Given a tool is installed and found in PATH, when its entry is displayed in the menu, then it appears in the normal text color indicating availability.",
+            "Given a tool is not installed (not in PATH), when its entry is displayed in the menu, then it appears in gray text with a '(not installed)' suffix.",
+            "Given the user selects a tool entry in the menu, when they toggle it, then the tool is enabled or disabled for that language without uninstalling it.",
+            "Given the user disables a tool via the menu, when the next format-on-save or lint runs, then the disabled tool is skipped."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "23",
+      "title": "F1 Help System",
+      "description": "Provide in-app help through a searchable keyboard shortcut reference dialog and word-under-cursor help via LSP.",
+      "user_stories": [
+        {
+          "id": "23.1",
+          "title": "F1 keyboard shortcut reference",
+          "description": "F1 opens a searchable help dialog showing all keyboard shortcuts grouped by category (editing, navigation, search, build, debug, etc.). The user can type to filter shortcuts in real time.",
+          "complexity": "Low",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the user is in the editor, when they press F1, then a help dialog opens showing all available keyboard shortcuts.",
+            "Given the help dialog is open, when shortcuts are displayed, then they are organized into logical categories such as Editing, Navigation, Search, Build, and Debug.",
+            "Given the help dialog is open, when the user types text into the search/filter field, then the displayed shortcuts are filtered in real time to show only those matching the typed text.",
+            "Given the help dialog is open, when the user presses Escape, then the dialog closes and focus returns to the editor.",
+            "Given the help dialog is open, when each shortcut entry is displayed, then it shows both the key combination and a description of the action it performs.",
+            "Given the user is in Vi keybinding mode, when F1 is pressed, then the help dialog shows the Vi-mode shortcuts alongside or instead of the default shortcuts."
+          ]
+        },
+        {
+          "id": "23.2",
+          "title": "Ctrl+F1 word-under-cursor help",
+          "description": "Ctrl+F1 looks up the word under the cursor via LSP hover, providing the same functionality as F11 but on a Borland-compatible keybinding. If no LSP is available, a message is shown.",
+          "complexity": "Medium",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given the cursor is on a function name and an LSP server is running, when the user presses Ctrl+F1, then the LSP hover information for that function is displayed in a popup.",
+            "Given the cursor is on a symbol and no LSP server is running for the file type, when the user presses Ctrl+F1, then the status bar shows 'No help available for this file type'.",
+            "Given the cursor is positioned on whitespace or an empty line, when the user presses Ctrl+F1, then no popup is shown and no error occurs.",
+            "Given the user is in Vi keybinding mode, when they press Ctrl+F1, then the same hover lookup behavior is triggered as in the default keybinding mode.",
+            "Given the LSP hover response contains markdown-formatted documentation, when the popup is displayed, then the text is rendered readably (stripped of raw markdown syntax or formatted appropriately for the terminal)."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "24",
+      "title": "LSP Auto-Install Prompting",
+      "description": "Track which file types the user opens and prompt them to install the appropriate LSP server when one is not detected.",
+      "user_stories": [
+        {
+          "id": "24.1",
+          "title": "Track opened file types",
+          "description": "Maintain a set of programming language identifiers the user has opened files for. Persist this set in the config file so it survives across sessions.",
+          "complexity": "Low",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the user opens a .py file for the first time, when the file is loaded, then 'python' is added to the tracked set of opened file types.",
+            "Given the user opens a .go file for the first time, when the file is loaded, then 'go' is added to the tracked set.",
+            "Given the tracked set has been updated, when the application is closed and reopened, then the tracked set is restored from the config file.",
+            "Given the user opens another .py file after 'python' is already in the tracked set, when the file is loaded, then no duplicate entry is added to the set.",
+            "Given the user opens a plain text file or unknown extension, when the file is loaded, then no entry is added to the tracked set since it is not a recognized programming language."
+          ]
+        },
+        {
+          "id": "24.2",
+          "title": "Prompt to install LSP server",
+          "description": "When opening a file type for the first time and no LSP server is detected for that language, show a non-blocking prompt offering to install the appropriate server. Display the install command. Do not prompt again after the user dismisses it.",
+          "complexity": "Medium",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given the user opens a .py file for the first time and pyright is not installed, when the file is loaded, then a status bar message or dialog shows a prompt with the install command 'pip install pyright'.",
+            "Given the user dismisses the LSP install prompt for Python, when the dismissal is recorded, then 'python' is stored as declined in the config file.",
+            "Given the user opens another .py file after declining the Python LSP prompt, when the file is loaded, then no prompt is shown for Python again.",
+            "Given the user opens a .go file and gopls is not installed, when the prompt appears, then it shows the correct install command 'go install golang.org/x/tools/gopls@latest'.",
+            "Given the user opens a .ts file and typescript-language-server is not installed, when the prompt appears, then it shows 'npm i -g typescript-language-server'.",
+            "Given the user opens a file type for which an LSP server is already running, when the file is loaded, then no install prompt is shown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "25",
+      "title": "Python Virtual Environment Support",
+      "description": "Detect and use Python virtual environments for tool execution, and provide UI indicators and switching capabilities.",
+      "user_stories": [
+        {
+          "id": "25.1",
+          "title": "Detect active virtual environment",
+          "description": "Check for the $VIRTUAL_ENV environment variable, or look for .venv/, venv/, .env/ directories in the project root. When a venv is found, prepend its bin path to PATH when executing formatters, linters, and the Python interpreter.",
+          "complexity": "Medium",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the $VIRTUAL_ENV environment variable is set, when NumenText executes black as a formatter, then it uses the black binary from the virtual environment's bin directory rather than the global one.",
+            "Given a .venv/ directory exists in the project root and $VIRTUAL_ENV is not set, when NumenText looks for Python tools, then it finds them in .venv/bin/.",
+            "Given a virtual environment is detected, when the status bar is displayed, then it shows the venv name in brackets (e.g., '[.venv]').",
+            "Given no virtual environment is detected and $VIRTUAL_ENV is not set, when NumenText executes Python tools, then it uses the global PATH.",
+            "Given the project directory changes (e.g., via File > Open or filetree navigation), when a new project root is determined, then venv detection runs again for the new location.",
+            "Given both $VIRTUAL_ENV and a local .venv/ directory exist, when detection runs, then $VIRTUAL_ENV takes precedence."
+          ]
+        },
+        {
+          "id": "25.2",
+          "title": "Venv indicator and switching",
+          "description": "Show the active virtual environment name in the status bar. Provide a menu for selecting a different venv if multiple are detected, including a 'System' option to use the global PATH.",
+          "complexity": "Low",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given a virtual environment is active, when the status bar is rendered, then the venv name is displayed in brackets (e.g., '[.venv]' or '[myenv]').",
+            "Given the user opens Options > Python Environment, when the menu is displayed, then it lists all detected virtual environments in the project.",
+            "Given the user selects a different venv from the Python Environment menu, when the selection is applied, then subsequent tool executions use the newly selected venv's bin path.",
+            "Given the user selects 'System' from the Python Environment menu, when the selection is applied, then the global PATH is used for all Python tool executions.",
+            "Given no Python files are open and no venv is detected, when the status bar is rendered, then no venv indicator is shown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "26",
+      "title": "Unit Test Runner",
+      "description": "Provide per-language test command configuration, keyboard-driven test execution, and a structured test results panel.",
+      "user_stories": [
+        {
+          "id": "26.1",
+          "title": "Per-language test command configuration",
+          "description": "Define default test commands for common languages: Python (pytest or unittest), Go (go test ./...), Rust (cargo test), JavaScript/TypeScript (npm test), C/C++ (make test or ctest). Auto-detect which test framework is available based on project files.",
+          "complexity": "Medium",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given a Go project with a go.mod file, when the test command is resolved, then 'go test ./...' is used as the default.",
+            "Given a Python project with pytest.ini or conftest.py present, when the test command is resolved, then 'pytest' is used as the default.",
+            "Given a Python project without pytest configuration files, when the test command is resolved, then 'python -m unittest discover' is used as the fallback.",
+            "Given a Rust project with a Cargo.toml file, when the test command is resolved, then 'cargo test' is used as the default.",
+            "Given a Node.js project with a package.json file, when the test command is resolved, then 'npm test' is used as the default.",
+            "Given the user has specified a custom test command in the config file, when the test command is resolved, then the user's custom command overrides the auto-detected default."
+          ]
+        },
+        {
+          "id": "26.2",
+          "title": "Run tests with keyboard shortcut",
+          "description": "Ctrl+T runs the test suite for the current project. Output is shown in the output panel. Test failures are parsed for file and line locations so Ctrl+E can navigate between them.",
+          "complexity": "Medium",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given the user presses Ctrl+T, when a test command is configured for the current project, then the test suite is executed and output is displayed in the output panel.",
+            "Given tests are running and output is being displayed, when a test fails with a file:line reference, then the failure location is parsed and added to the navigable error list.",
+            "Given test output contains parsed failure locations, when the user presses Ctrl+E, then the cursor navigates to the next test failure location in the source file.",
+            "Given tests are already running and the user presses Ctrl+T again, when the key is pressed, then the status bar shows 'Tests already running' and no second test process is launched.",
+            "Given the user presses Ctrl+T, when tests begin executing, then the status bar shows 'Testing...' until the test process completes.",
+            "Given tests complete successfully, when the output is displayed, then the status bar shows 'Tests passed' or a summary of the results."
+          ]
+        },
+        {
+          "id": "26.3",
+          "title": "Test results panel",
+          "description": "Parse test framework output to show structured results with test name, status (pass/fail/skip), and duration. Clicking a failed test jumps to the test function. Support output formats from pytest, go test, and cargo test.",
+          "complexity": "High",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given tests have been run, when the test results panel is displayed, then each test is shown with its name, status (pass/fail/skip), and duration.",
+            "Given the results panel shows failed tests, when a failed test entry is displayed, then it is highlighted in red and includes the error message.",
+            "Given the results panel shows a failed test, when the user clicks or selects the failed test entry, then the editor opens the file and jumps to the line where the test function is defined.",
+            "Given the test run is complete, when the results panel summary is displayed, then it shows the total counts (e.g., '10 passed, 2 failed, 1 skipped').",
+            "Given the project uses pytest, when test output is parsed, then pytest's output format (PASSED/FAILED/SKIPPED with file::test_name) is correctly interpreted.",
+            "Given the project uses 'go test -v', when test output is parsed, then Go's output format (--- PASS/FAIL: TestName (0.01s)) is correctly interpreted.",
+            "Given the project uses 'cargo test', when test output is parsed, then Rust's output format (test module::test_name ... ok/FAILED) is correctly interpreted.",
+            "Given a new test run is triggered, when the results panel is displayed, then the previous results are replaced with the new results."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "27",
+      "title": "Git Diff Display",
+      "description": "Show inline git diff markers in the editor gutter and provide a diff view dialog for reviewing changes.",
+      "user_stories": [
+        {
+          "id": "27.1",
+          "title": "Run git diff and show inline markers",
+          "description": "Execute 'git diff' on the current file and display gutter markers: green for added lines, red for deleted lines (marker only at the deletion point), and blue for modified lines. Markers refresh automatically on file save.",
+          "complexity": "High",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given a file has new lines added since the last git commit, when the editor renders the gutter, then those lines show a green marker.",
+            "Given lines have been deleted from a file since the last git commit, when the editor renders the gutter, then a red marker is shown at the line position where the deletion occurred.",
+            "Given lines have been modified since the last git commit, when the editor renders the gutter, then those lines show a blue marker.",
+            "Given the user saves the file, when the save completes, then the git diff markers are recalculated and the gutter is updated.",
+            "Given the current file is not tracked by git or is not in a git repository, when the editor renders the gutter, then no diff markers are shown and no error is displayed.",
+            "Given git is not installed on the system, when the editor attempts to run git diff, then no markers are shown and no error dialog is presented to the user.",
+            "Given a file has been newly created and is not yet committed, when the editor renders the gutter, then all lines show green markers indicating they are all additions."
+          ]
+        },
+        {
+          "id": "27.2",
+          "title": "Diff view dialog",
+          "description": "A dialog or split view showing the git diff output for the current file in unified diff format. Added lines are highlighted in green, removed lines in red, and context lines in the default color.",
+          "complexity": "High",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given the user selects 'View > Git Diff' from the menu, when the current file has uncommitted changes, then a dialog opens showing the unified diff output.",
+            "Given the diff dialog is open, when added lines (prefixed with '+') are displayed, then they are highlighted with a green background or text color.",
+            "Given the diff dialog is open, when removed lines (prefixed with '-') are displayed, then they are highlighted with a red background or text color.",
+            "Given the diff dialog is open, when context lines (prefixed with ' ') are displayed, then they appear in the default text color.",
+            "Given the diff dialog is open, when the user presses Escape, then the dialog closes and focus returns to the editor.",
+            "Given the current file has no uncommitted changes, when the user selects 'View > Git Diff', then the dialog shows a message 'No changes' rather than an empty diff."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "28",
+      "title": "HTML Tools",
+      "description": "Provide HTML entity encoding/decoding and an entity picker for inserting special characters.",
+      "user_stories": [
+        {
+          "id": "28.1",
+          "title": "Encode HTML special characters",
+          "description": "Add Edit menu actions for 'HTML Encode' and 'HTML Decode'. Encode converts characters like <, >, &, \", and ' to their HTML entity equivalents. Decode does the reverse. Operates on the selection if present, or the entire file otherwise.",
+          "complexity": "Low",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the user selects '<div>' in the editor and runs 'HTML Encode' from the Edit menu, when the encoding is applied, then the selected text is replaced with '&lt;div&gt;'.",
+            "Given the user selects text containing '&' and runs 'HTML Encode', when the encoding is applied, then '&' is replaced with '&amp;'.",
+            "Given no text is selected and the user runs 'HTML Encode', when the encoding is applied, then all HTML special characters in the entire file are encoded.",
+            "Given text is selected and the user runs 'HTML Encode', when the encoding is applied, then only the selected text is encoded and the rest of the file is unchanged.",
+            "Given the user selects '&lt;' and runs 'HTML Decode', when the decoding is applied, then the entity is converted back to '<'.",
+            "Given the user selects '&amp;' and runs 'HTML Decode', when the decoding is applied, then the entity is converted back to '&'.",
+            "Given the user has performed an HTML Encode operation, when the user presses Ctrl+Z, then the encoding is undone and the original text is restored."
+          ]
+        },
+        {
+          "id": "28.2",
+          "title": "Insert HTML entity picker",
+          "description": "A dialog listing common HTML entities with their description and rendered character. The list is searchable. Selecting an entity inserts it at the cursor position.",
+          "complexity": "Low",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given the user selects 'Edit > Insert HTML Entity', when the picker dialog opens, then it displays a list of common HTML entities.",
+            "Given the entity picker is open, when the list is displayed, then it includes at least &nbsp;, &lt;, &gt;, &amp;, &copy;, &reg;, &mdash;, &ndash;, &laquo;, &raquo;, and 20 or more additional entities.",
+            "Given the entity picker is open, when each entry is displayed, then it shows the entity code, a description, and the rendered character representation.",
+            "Given the entity picker is open, when the user types in the search field, then the list is filtered in real time to show only entities matching the typed text.",
+            "Given the entity picker is open, when the user selects an entry and presses Enter, then the entity code is inserted at the cursor position in the editor.",
+            "Given the entity picker is open, when the user presses Escape, then the dialog closes without inserting anything."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "29",
+      "title": "Tab Switcher",
+      "description": "Provide a quick-pick dropdown for switching between open tabs, especially when too many tabs are open to display in the tab bar.",
+      "user_stories": [
+        {
+          "id": "29.1",
+          "title": "Tab switcher dropdown",
+          "description": "A quick-pick dropdown showing all open tabs, triggered by clicking a tab overflow indicator or through a keyboard shortcut. Shows filename and modified status. Sorted by most recently used.",
+          "complexity": "Medium",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given more tabs are open than can fit in the tab bar width, when the tab bar is rendered, then an overflow indicator ('+' or '...') appears at the end of the tab bar.",
+            "Given the overflow indicator is visible, when the user clicks it, then a dropdown list appears showing all open tabs with their filenames.",
+            "Given the tab switcher dropdown is open, when entries are displayed, then each entry shows the filename and a modified indicator (e.g., a dot or asterisk) if the file has unsaved changes.",
+            "Given the tab switcher dropdown is open, when the user selects an entry, then the editor switches to that tab and the dropdown closes.",
+            "Given the tab switcher dropdown is open, when entries are listed, then they are sorted by most recently used (most recent at the top).",
+            "Given fewer tabs are open than can fit in the tab bar, when the tab bar is rendered, then no overflow indicator is shown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "30",
+      "title": "Block Selection Mode (Column Selection)",
+      "description": "Add rectangular/column selection mode for editing text in vertical blocks across multiple lines.",
+      "user_stories": [
+        {
+          "id": "30.1",
+          "title": "Column/block selection with Alt+Shift+Arrow",
+          "description": "Add rectangular/column selection mode activated by Alt+Shift+Arrow keys. The selection is rendered as a filled rectangle across lines. Typing, deleting, and clipboard operations work across all selected lines at the same column positions.",
+          "complexity": "High",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the cursor is at line 5 column 10, when the user presses Alt+Shift+Down three times, then a 1-column-wide block is selected spanning lines 5 through 8 at column 10.",
+            "Given a block selection is active, when the user presses Alt+Shift+Right, then the selection width expands by one column on each selected line.",
+            "Given a block selection is active, when the selection is rendered, then it appears as a highlighted rectangle rather than full-line highlighting.",
+            "Given a block selection is active, when the user presses Ctrl+C, then the copied text contains the rectangular region with each line clipped to the selection columns.",
+            "Given rectangular text has been copied, when the user pastes with Ctrl+V, then the text is inserted column-wise across lines starting at the cursor position.",
+            "Given a block selection is active, when the user types a character, then that character replaces or is inserted at the same column position on every selected line.",
+            "Given a block selection is active, when the user presses Backspace, then one column of characters is deleted from each selected line.",
+            "Given a block selection is active, when the user presses Escape, then the block selection is cleared and the editor returns to normal cursor mode.",
+            "Given a block selection spans lines of different lengths where some lines are shorter than the selection column, when the selection is applied, then short lines are treated as if padded with spaces to fill the selection rectangle."
+          ]
+        },
+        {
+          "id": "30.2",
+          "title": "Alt+Shift+Mouse drag for block selection",
+          "description": "Holding Alt+Shift while dragging the mouse creates a rectangular selection from the drag start position to the current mouse position.",
+          "complexity": "Medium",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given the user holds Alt+Shift and clicks in the editor, when the click is registered, then it sets the anchor point for a block selection.",
+            "Given the user holds Alt+Shift and drags from the anchor point, when the mouse moves, then a rectangular selection is visually rendered from the anchor to the current mouse position.",
+            "Given the user releases the mouse button after an Alt+Shift drag, when the release is registered, then the rectangular selection is finalized and remains active.",
+            "Given a block selection was created via Alt+Shift+drag, when the user presses Ctrl+C, then the rectangular region is copied to the clipboard.",
+            "Given a block selection is active, when the user performs any action that is not a block selection action (e.g., pressing an arrow key without Alt+Shift), then the block selection is cleared."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "31",
+      "title": "Enhanced Shift+Arrow Selection",
+      "description": "Improve and verify word-by-word selection behavior with Shift+Ctrl+Arrow keys.",
+      "user_stories": [
+        {
+          "id": "31.1",
+          "title": "Shift+Ctrl+Arrow word selection",
+          "description": "Shift+Ctrl+Left/Right selects word-by-word. Verify and ensure consistent behavior including selection across line boundaries, and add double-click to select word and triple-click to select line.",
+          "complexity": "Low",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the cursor is at the beginning of a word, when the user presses Shift+Ctrl+Right, then the selection extends from the cursor to the end of the current word.",
+            "Given a word is already selected via Shift+Ctrl+Right, when the user presses Shift+Ctrl+Right again, then the selection extends further to include the next word.",
+            "Given the cursor is at the end of a word, when the user presses Shift+Ctrl+Left, then the selection extends from the cursor to the start of the current word.",
+            "Given the cursor is at the end of a line, when the user presses Shift+Ctrl+Right, then the selection extends correctly across the line boundary to the first word of the next line.",
+            "Given the user double-clicks on a word in the editor, when the click is registered, then the entire word under the cursor is selected.",
+            "Given the user triple-clicks on a line in the editor, when the click is registered, then the entire line is selected."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "32",
+      "title": "Binary Hex Viewer/Editor",
+      "description": "Detect binary files and provide a two-pane hex viewer with editing capabilities for inspecting and modifying binary data.",
+      "user_stories": [
+        {
+          "id": "32.1",
+          "title": "Detect binary files on open",
+          "description": "When opening a file, scan the first 8KB for null bytes or non-text bytes. If the file is detected as binary (more than 5% non-printable bytes), open it in hex view mode. Provide menu options to switch between hex and text views.",
+          "complexity": "Medium",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the user opens a .exe or .bin file, when the first 8KB contains more than 5% non-printable bytes, then the file is automatically opened in hex view mode.",
+            "Given the user opens a .txt file with normal text content, when the binary detection runs, then the file opens normally in the text editor.",
+            "Given the user has a file open in text view, when they select 'View > Open as Hex', then the same file is displayed in hex view mode.",
+            "Given the user has a file open in hex view, when they select 'View > Open as Text', then the file switches to the normal text editor view.",
+            "Given a file has exactly 5% or fewer non-printable bytes in the first 8KB, when the detection runs, then it opens as a normal text file."
+          ]
+        },
+        {
+          "id": "32.2",
+          "title": "Two-pane hex viewer",
+          "description": "Left pane shows hex bytes in rows of 16 with addresses on the left margin and 8+8 grouping. Right pane shows ASCII text representation with dots for non-printable characters. Cursor and scrolling are synchronized between panes.",
+          "complexity": "High",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given a binary file is open in hex view, when the left pane is rendered, then it shows hex bytes in the format '00000000: 48 65 6C 6C 6F 20 57 6F  72 6C 64 0A ...' with 16 bytes per row and 8+8 grouping separated by an extra space.",
+            "Given a binary file is open in hex view, when the right pane is rendered, then it shows ASCII character representation with printable characters shown as-is and non-printable bytes shown as dots.",
+            "Given the cursor is positioned on a hex byte in the left pane, when the cursor moves, then the corresponding ASCII character in the right pane is also highlighted.",
+            "Given the user scrolls in either pane, when the scroll position changes, then both panes scroll in sync.",
+            "Given the left pane is displayed, when the address column is rendered, then it shows the file offset in hexadecimal for each row.",
+            "Given a binary file is open in hex view, when the display is rendered, then exactly 16 bytes are shown per row.",
+            "Given the cursor is in the hex pane, when the user presses Tab, then focus switches to the ASCII pane and vice versa."
+          ]
+        },
+        {
+          "id": "32.3",
+          "title": "Hex editing",
+          "description": "Allow editing hex values in the left pane by typing hex digits. Support insert and overwrite modes toggled by the Insert key. Changes are reflected immediately in the ASCII pane. Full undo/redo and save support. Go to Address dialog for offset navigation.",
+          "complexity": "Very High",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given the cursor is on a byte in the hex pane, when the user types '4' then '1', then the byte at that position changes to 0x41 and the ASCII pane updates to show 'A'.",
+            "Given the editor is in overwrite mode (default), when the user types hex digits at a byte position, then the existing byte is replaced without shifting subsequent bytes.",
+            "Given the user presses Insert to toggle to insert mode, when the user types hex digits for a new byte, then subsequent bytes are shifted right to accommodate the insertion.",
+            "Given the user presses Delete on a byte in the hex pane, when the deletion is applied, then the byte is removed and subsequent bytes shift left.",
+            "Given the user has made edits, when the user presses Ctrl+Z, then the last edit is undone and both panes reflect the reverted state.",
+            "Given the user has undone an edit, when the user presses Ctrl+Y, then the edit is re-applied.",
+            "Given the user has made edits, when the user presses Ctrl+S, then the modified binary data is saved to disk.",
+            "Given the file has been modified, when the tab title is displayed, then a modified indicator is shown.",
+            "Given a binary file is open in hex view, when the status bar is rendered, then it shows the file size in bytes.",
+            "Given the user presses Ctrl+G in hex view, when the 'Go to Address' dialog opens and the user enters a hex offset, then the cursor jumps to that byte offset in the file."
+          ]
+        }
+      ]
+    }
+  ]
+}
