@@ -269,6 +269,11 @@ func (a *App) setupMenus() {
 			{Label: "Convert Spaces to Tabs", Action: func() {
 				a.editor.ConvertSpacesToTabs()
 			}},
+			{Label: "---", Disabled: true},
+			{Label: "HTML Encode", Accel: 'h', Action: a.htmlEncode},
+			{Label: "HTML Decode", Accel: 'd', Action: a.htmlDecode},
+			{Label: "Insert HTML Entity...", Accel: 'n', Action: a.showHTMLEntityPicker},
+
 		},
 	}
 
@@ -435,6 +440,7 @@ func (a *App) setupMenus() {
 		Items: []*ui.MenuItem{
 			{Label: "Next Tab", Shortcut: "Ctrl+Tab", Action: a.nextTab},
 			{Label: "Prev Tab", Shortcut: "Ctrl+Shift+Tab", Action: a.prevTab},
+			{Label: "Tab Switcher", Accel: 't', Action: a.showTabSwitcher},
 			{Label: "Close Tab", Shortcut: "Ctrl+W", Action: a.closeTab},
 			{Label: "New Terminal Session", Shortcut: "Ctrl+Shift+T", Action: a.createTerminal},
 		},
@@ -1094,6 +1100,29 @@ func (a *App) showSearchPalette() {
 // buildPaletteCommands collects all menu items into a flat list of PaletteCommands.
 func (a *App) buildPaletteCommands() []ui.PaletteCommand {
 	var commands []ui.PaletteCommand
+
+	// Add open tabs at the top, sorted by MRU
+	mruOrder := a.editor.MRUTabOrder()
+	for _, tabIdx := range mruOrder {
+		tabs := a.editor.Tabs()
+		if tabIdx < 0 || tabIdx >= len(tabs) {
+			continue
+		}
+		tab := tabs[tabIdx]
+		label := "Open: " + tab.Name
+		if tab.Buffer.Modified() {
+			label += " *"
+		}
+		idx := tabIdx // capture for closure
+		commands = append(commands, ui.PaletteCommand{
+			Label:    label,
+			Shortcut: "",
+			Action: func() {
+				a.editor.SetActiveTab(idx)
+			},
+		})
+	}
+
 	for _, menu := range a.menuBar.Menus() {
 		if menu.OnOpen != nil {
 			menu.OnOpen()
@@ -3256,5 +3285,56 @@ func (a *App) showPythonEnvDialog() {
 		AddItem(nil, 0, 1, false)
 
 	a.layout.ShowDialog("pyenv", modal)
+}
+
+// showTabSwitcher opens the tab switcher dropdown on the editor.
+func (a *App) showTabSwitcher() {
+	a.editor.OpenTabSwitcher()
+	a.tviewApp.SetFocus(a.editor)
+}
+
+// htmlEncode encodes HTML special characters in the selection or entire file.
+func (a *App) htmlEncode() {
+	if a.editor.HTMLEncodeSelection() {
+		a.statusBar.SetMessage("HTML encoded")
+	} else {
+		a.statusBar.SetMessage("Nothing to encode")
+	}
+}
+
+// htmlDecode decodes HTML entities in the selection or entire file.
+func (a *App) htmlDecode() {
+	if a.editor.HTMLDecodeSelection() {
+		a.statusBar.SetMessage("HTML decoded")
+	} else {
+		a.statusBar.SetMessage("Nothing to decode")
+	}
+}
+
+// showHTMLEntityPicker opens the HTML entity picker dialog.
+func (a *App) showHTMLEntityPicker() {
+	// Convert editor.HTMLEntities to ui.HTMLEntityEntry
+	entries := make([]ui.HTMLEntityEntry, len(editor.HTMLEntities))
+	for i, ent := range editor.HTMLEntities {
+		entries[i] = ui.HTMLEntityEntry{
+			Entity:      ent.Entity,
+			Character:   ent.Character,
+			Description: ent.Description,
+		}
+	}
+
+	dialog := ui.HTMLEntityDialog(a.tviewApp, entries,
+		func(entity string) {
+			a.layout.HideDialog("htmlentity")
+			a.tviewApp.SetFocus(a.editor)
+			a.editor.InsertAtCursor(entity)
+			a.statusBar.SetMessage("Inserted " + entity)
+		},
+		func() {
+			a.layout.HideDialog("htmlentity")
+			a.tviewApp.SetFocus(a.editor)
+		},
+	)
+	a.layout.ShowDialog("htmlentity", dialog)
 
 }
