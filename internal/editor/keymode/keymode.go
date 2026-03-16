@@ -67,6 +67,12 @@ const (
 	ActionSelectLine          // Helix x — select current line
 	ActionExtendLineSelect    // Helix X — extend selection by line
 	ActionMatchBracket        // Jump to matching bracket
+
+	// Block/column selection
+	ActionBlockSelectUp    // Alt+Shift+Up: extend block selection up
+	ActionBlockSelectDown  // Alt+Shift+Down: extend block selection down
+	ActionBlockSelectLeft  // Alt+Shift+Left: extend block selection left
+	ActionBlockSelectRight // Alt+Shift+Right: extend block selection right
 )
 
 // MapKey maps a tcell key event to an editor action (standard non-modal mapping)
@@ -76,9 +82,13 @@ func MapKey(ev *tcell.EventKey) Action {
 
 	shift := mod&tcell.ModShift != 0
 	ctrl := mod&tcell.ModCtrl != 0
+	alt := mod&tcell.ModAlt != 0
 
 	switch key {
 	case tcell.KeyLeft:
+		if alt && shift {
+			return ActionBlockSelectLeft
+		}
 		if ctrl && shift {
 			return ActionSelectWordLeft
 		}
@@ -90,6 +100,9 @@ func MapKey(ev *tcell.EventKey) Action {
 		}
 		return ActionCursorLeft
 	case tcell.KeyRight:
+		if alt && shift {
+			return ActionBlockSelectRight
+		}
 		if ctrl && shift {
 			return ActionSelectWordRight
 		}
@@ -101,11 +114,17 @@ func MapKey(ev *tcell.EventKey) Action {
 		}
 		return ActionCursorRight
 	case tcell.KeyUp:
+		if alt && shift {
+			return ActionBlockSelectUp
+		}
 		if shift {
 			return ActionSelectUp
 		}
 		return ActionCursorUp
 	case tcell.KeyDown:
+		if alt && shift {
+			return ActionBlockSelectDown
+		}
 		if shift {
 			return ActionSelectDown
 		}

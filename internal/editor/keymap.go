@@ -65,6 +65,12 @@ const (
 	ActionSelectLine          = keymode.ActionSelectLine
 	ActionExtendLineSelect    = keymode.ActionExtendLineSelect
 	ActionMatchBracket        = keymode.ActionMatchBracket
+
+	// Block/column selection
+	ActionBlockSelectUp    = keymode.ActionBlockSelectUp
+	ActionBlockSelectDown  = keymode.ActionBlockSelectDown
+	ActionBlockSelectLeft  = keymode.ActionBlockSelectLeft
+	ActionBlockSelectRight = keymode.ActionBlockSelectRight
 )
 
 // MapKey is re-exported from keymode for backward compatibility
