@@ -288,6 +288,11 @@ func (a *App) setupMenus() {
 			{Label: "Open as Text", Accel: 't', Action: a.openCurrentAsText},
 			{Label: "---"},
 			{Label: "Git Diff", Accel: 'g', Action: a.showGitDiff},
+			{Label: "---"},
+			{Label: "Markdown Preview", Accel: 'm', Action: func() {
+				a.editor.ToggleMarkdownMode()
+				a.statusBar.SetMarkdownMode(a.editor.IsMarkdownMode())
+			}},
 		},
 	}
 
@@ -1106,6 +1111,7 @@ func (a *App) updateStatusBar() {
 		a.statusBar.Update(tab.Name, tab.CursorRow, tab.CursorCol, tab.Highlighter.Language(), tab.Buffer.Modified())
 		a.statusBar.SetLineEnding(a.editor.LineEndingLabel())
 		a.statusBar.SetHasBOM(a.editor.HasBOM())
+		a.statusBar.SetMarkdownMode(tab.MarkdownMode)
 		// Show build error info if navigating errors, otherwise show diagnostic
 		if len(a.buildErrors) > 0 && a.buildErrorIdx >= 0 && a.buildErrorIdx < len(a.buildErrors) {
 			be := a.buildErrors[a.buildErrorIdx]

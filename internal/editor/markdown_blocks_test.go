@@ -370,7 +370,7 @@ func TestPadCell(t *testing.T) {
 	}
 }
 
-func TestIsMarkdownFile(t *testing.T) {
+func TestIsMarkdownFileBlocks(t *testing.T) {
 	tests := []struct {
 		name string
 		want bool
