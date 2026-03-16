@@ -57,6 +57,18 @@ func ServerForFile(filePath string) *ServerConfig {
 	return nil
 }
 
+// LSPInstallCommands maps language IDs to their LSP server install commands.
+var LSPInstallCommands = map[string]string{
+	"go":         "go install golang.org/x/tools/gopls@latest",
+	"python":     "pip install pyright",
+	"rust":       "rustup component add rust-analyzer",
+	"c":          "install clangd",
+	"cpp":        "install clangd",
+	"javascript": "npm install -g typescript-language-server typescript",
+	"typescript": "npm install -g typescript-language-server typescript",
+	"java":       "install jdtls",
+}
+
 // LanguageIDForFile returns the LSP languageId for a file extension
 func LanguageIDForFile(filePath string) string {
 	ext := strings.ToLower(filepath.Ext(filePath))

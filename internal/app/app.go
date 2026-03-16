@@ -64,14 +64,21 @@ type App struct {
 	buildErrors      []runner.BuildError
 	buildErrorIdx    int  // current error index (0-based), -1 if none
 	navigatingErrors bool // true while jumping to an error (suppresses clear)
+
+	// Test runner
+	testRunner    *runner.TestRunner
+	testErrors    []runner.TestEntry // failed tests for Ctrl+E navigation
+	testErrorIdx  int               // current test error index
 }
 
 func New() *App {
 	a := &App{
 		tviewApp:      tview.NewApplication(),
 		runner:        runner.New(),
+		testRunner:    runner.NewTestRunner(),
 		config:        config.Load(),
 		buildErrorIdx: -1,
+		testErrorIdx:  -1,
 	}
 
 	a.workDir, _ = os.Getwd()
@@ -638,6 +645,10 @@ func (a *App) setupKeybindings() {
 				case 't':
 					if mod&tcell.ModShift != 0 && a.focusedPanel == "terminal" {
 						a.createTerminal()
+						return nil
+					}
+					if mod&tcell.ModShift == 0 {
+						a.runTests()
 						return nil
 					}
 				case 'i':
@@ -1597,6 +1608,139 @@ func (a *App) prevBuildError() {
 	a.jumpToBuildError(prev)
 }
 
+// trackFileLanguage tracks opened file types and prompts for LSP install if needed.
+func (a *App) trackFileLanguage(filePath string) {
+	langID := lsp.LanguageIDForFile(filePath)
+	if langID == "" {
+		return
+	}
+
+	isNew := a.config.TrackLanguage(langID)
+	if isNew {
+		_ = a.config.Save()
+	}
+
+	// Check if LSP server is available
+	cfg := lsp.ServerForFile(filePath)
+	if cfg != nil {
+		return // LSP server found, no need to prompt
+	}
+
+	// Already declined?
+	if a.config.IsLSPDeclined(langID) {
+		return
+	}
+
+	// Show install suggestion in status bar
+	installCmd, ok := lsp.LSPInstallCommands[langID]
+	if !ok {
+		return
+	}
+
+	a.statusBar.SetMessage("No LSP server for " + langID + ". Install: " + installCmd)
+
+	// Mark as declined so we don't prompt again this session
+	a.config.DeclineLSP(langID)
+	_ = a.config.Save()
+}
+
+// runTests runs the test suite for the current project via Ctrl+T.
+func (a *App) runTests() {
+	if a.testRunner.IsRunning() {
+		a.statusBar.SetMessage("Tests already running")
+		return
+	}
+
+	tab := a.editor.ActiveTab()
+	filePath := ""
+	if tab != nil {
+		filePath = tab.FilePath
+	}
+
+	// Determine language for custom test command lookup
+	langID := ""
+	if filePath != "" {
+		langID = lsp.LanguageIDForFile(filePath)
+	}
+	customCmd := a.config.TestCommandForLanguage(langID)
+
+	var cmdName string
+	var args []string
+	if filePath != "" {
+		cmdName, args = runner.DetectTestCommandForFile(filePath, a.workDir, customCmd)
+	} else {
+		cmdName, args = runner.DetectTestCommand(a.workDir, customCmd)
+	}
+
+	if cmdName == "" {
+		a.statusBar.SetMessage("No test command detected for this project")
+		return
+	}
+
+	fullCmd := cmdName
+	if len(args) > 0 {
+		fullCmd += " " + strings.Join(args, " ")
+	}
+
+	a.output.Clear()
+	a.output.AppendCommand(fullCmd)
+	a.statusBar.SetMessage("Running tests...")
+
+	go func() {
+		result := a.testRunner.RunTests(a.workDir, cmdName, args)
+		a.tviewApp.QueueUpdateDraw(func() {
+			// Show colorized output
+			colorized := runner.ColorizeTestOutput(result.Output)
+			if colorized != "" {
+				a.output.AppendText(colorized)
+			}
+			if result.Error != "" && result.Output == "" {
+				a.output.AppendError(result.Error)
+			}
+
+			// Show summary
+			summary := runner.FormatTestSummary(result.Summary)
+			if result.Summary.Failed > 0 {
+				a.output.AppendError(fmt.Sprintf("\nTests: %s (%.2fs)", summary, result.Duration.Seconds()))
+				a.statusBar.SetMessage("Tests: " + summary)
+			} else if result.Summary.Total > 0 {
+				a.output.AppendSuccess(fmt.Sprintf("\nTests: %s (%.2fs)", summary, result.Duration.Seconds()))
+				a.statusBar.SetMessage("Tests: " + summary)
+			} else {
+				a.output.AppendText(fmt.Sprintf("\nTests completed (%.2fs) - no structured results parsed", result.Duration.Seconds()))
+				if result.ExitCode == 0 {
+					a.statusBar.SetMessage("Tests passed")
+				} else {
+					a.statusBar.SetMessage("Tests failed (exit code " + fmt.Sprintf("%d", result.ExitCode) + ")")
+				}
+			}
+
+			// Store failed tests for Ctrl+E navigation
+			a.testErrors = nil
+			a.testErrorIdx = -1
+			for _, entry := range result.Tests {
+				if entry.Status == "fail" && entry.File != "" && entry.Line > 0 {
+					a.testErrors = append(a.testErrors, entry)
+				}
+			}
+			if len(a.testErrors) > 0 {
+				a.statusBar.SetHasErrors(true)
+				// Convert to build errors for navigation
+				a.buildErrors = nil
+				for _, te := range a.testErrors {
+					a.buildErrors = append(a.buildErrors, runner.BuildError{
+						File:     te.File,
+						Line:     te.Line,
+						Severity: "error",
+						Message:  te.Name + ": " + te.Message,
+					})
+				}
+				a.buildErrorIdx = -1
+			}
+		})
+	}()
+}
+
 func (a *App) stopRun() {
 	a.runner.Stop()
 	a.output.AppendText("\nProcess stopped.")
@@ -1813,6 +1957,8 @@ func (a *App) setupLSP() {
 			a.lspManager.NotifyOpen(filePath, text)
 			a.refreshBreadcrumb(filePath)
 		}()
+		// Track opened file language and prompt for LSP install if needed
+		a.trackFileLanguage(filePath)
 	})
 	a.editor.SetOnFileChange(func(filePath, text string) {
 		go func() {

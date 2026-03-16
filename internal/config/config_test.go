@@ -179,6 +179,97 @@ func TestLanguageTools_JSONRoundTrip(t *testing.T) {
 	}
 }
 
+// === Epic 24: LSP Auto-Install Prompting ===
+
+func TestTrackLanguage_NewLanguage(t *testing.T) {
+	cfg := DefaultConfig()
+	isNew := cfg.TrackLanguage("python")
+	if !isNew {
+		t.Error("expected new language to return true")
+	}
+	if len(cfg.TrackedLanguages) != 1 || cfg.TrackedLanguages[0] != "python" {
+		t.Errorf("expected [python], got %v", cfg.TrackedLanguages)
+	}
+}
+
+func TestTrackLanguage_DuplicateLanguage(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TrackLanguage("go")
+	isNew := cfg.TrackLanguage("go")
+	if isNew {
+		t.Error("expected duplicate language to return false")
+	}
+	if len(cfg.TrackedLanguages) != 1 {
+		t.Errorf("expected 1 tracked language, got %d", len(cfg.TrackedLanguages))
+	}
+}
+
+func TestTrackLanguage_MultipleLanguages(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TrackLanguage("python")
+	cfg.TrackLanguage("go")
+	cfg.TrackLanguage("rust")
+	if len(cfg.TrackedLanguages) != 3 {
+		t.Errorf("expected 3 tracked languages, got %d", len(cfg.TrackedLanguages))
+	}
+}
+
+func TestDeclineLSP(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.IsLSPDeclined("python") {
+		t.Error("expected python not declined initially")
+	}
+	cfg.DeclineLSP("python")
+	if !cfg.IsLSPDeclined("python") {
+		t.Error("expected python declined after DeclineLSP")
+	}
+	// Decline again should not duplicate
+	cfg.DeclineLSP("python")
+	if len(cfg.DeclinedLSP) != 1 {
+		t.Errorf("expected 1 declined entry, got %d", len(cfg.DeclinedLSP))
+	}
+}
+
+func TestTrackedLanguages_JSONRoundTrip(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TrackLanguage("go")
+	cfg.TrackLanguage("python")
+	cfg.DeclineLSP("python")
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	cfg2 := DefaultConfig()
+	if err := json.Unmarshal(data, cfg2); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if len(cfg2.TrackedLanguages) != 2 {
+		t.Errorf("expected 2 tracked languages after round-trip, got %d", len(cfg2.TrackedLanguages))
+	}
+	if len(cfg2.DeclinedLSP) != 1 || cfg2.DeclinedLSP[0] != "python" {
+		t.Errorf("expected declined [python] after round-trip, got %v", cfg2.DeclinedLSP)
+	}
+}
+
+func TestTestCommandForLanguage(t *testing.T) {
+	cfg := DefaultConfig()
+	// No test commands configured
+	if cmd := cfg.TestCommandForLanguage("go"); cmd != "" {
+		t.Errorf("expected empty, got %s", cmd)
+	}
+
+	// Configure custom test command
+	cfg.TestCommands = map[string]string{
+		"go": "make test",
+	}
+	if cmd := cfg.TestCommandForLanguage("go"); cmd != "make test" {
+		t.Errorf("expected 'make test', got %s", cmd)
+	}
+}
+
 func TestLanguageTools_InvalidToolSkipped(t *testing.T) {
 	jsonData := `{
 		"tab_size": 4,

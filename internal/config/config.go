@@ -26,17 +26,20 @@ type LanguageToolConfig struct {
 }
 
 type Config struct {
-	RecentFiles   []string                      `json:"recent_files"`
-	TabSize       int                           `json:"tab_size"`
-	Theme         string                        `json:"theme"`
-	ShowLineNum   bool                          `json:"show_line_numbers"`
-	WordWrap      bool                          `json:"word_wrap"`
-	KeyboardMode  string                        `json:"keyboard_mode"`
-	FileTreeWidth int                           `json:"file_tree_width"`
-	OutputHeight  int                           `json:"output_height"`
-	UIStyle       string                        `json:"ui_style"`
-	IconSet       string                        `json:"icon_set"`
-	LanguageTools map[string]LanguageToolConfig  `json:"language_tools"`
+	RecentFiles      []string                      `json:"recent_files"`
+	TabSize          int                           `json:"tab_size"`
+	Theme            string                        `json:"theme"`
+	ShowLineNum      bool                          `json:"show_line_numbers"`
+	WordWrap         bool                          `json:"word_wrap"`
+	KeyboardMode     string                        `json:"keyboard_mode"`
+	FileTreeWidth    int                           `json:"file_tree_width"`
+	OutputHeight     int                           `json:"output_height"`
+	UIStyle          string                        `json:"ui_style"`
+	IconSet          string                        `json:"icon_set"`
+	LanguageTools    map[string]LanguageToolConfig  `json:"language_tools"`
+	TrackedLanguages []string                       `json:"tracked_languages,omitempty"`
+	DeclinedLSP      []string                       `json:"declined_lsp,omitempty"`
+	TestCommands     map[string]string              `json:"test_commands,omitempty"`
 }
 
 func DefaultConfig() *Config {
@@ -130,6 +133,43 @@ func (c *Config) Save() error {
 		return err
 	}
 	return os.WriteFile(ConfigPath(), data, 0644)
+}
+
+// TrackLanguage adds a language to the tracked set if not already present.
+func (c *Config) TrackLanguage(lang string) bool {
+	for _, l := range c.TrackedLanguages {
+		if l == lang {
+			return false // already tracked
+		}
+	}
+	c.TrackedLanguages = append(c.TrackedLanguages, lang)
+	return true // newly tracked
+}
+
+// IsLSPDeclined returns true if the user has declined the LSP install prompt for a language.
+func (c *Config) IsLSPDeclined(lang string) bool {
+	for _, l := range c.DeclinedLSP {
+		if l == lang {
+			return true
+		}
+	}
+	return false
+}
+
+// DeclineLSP records that the user dismissed the LSP install prompt for a language.
+func (c *Config) DeclineLSP(lang string) {
+	if !c.IsLSPDeclined(lang) {
+		c.DeclinedLSP = append(c.DeclinedLSP, lang)
+	}
+}
+
+// TestCommandForLanguage returns the user-configured test command for a language,
+// or empty string if none is configured.
+func (c *Config) TestCommandForLanguage(lang string) string {
+	if c.TestCommands == nil {
+		return ""
+	}
+	return c.TestCommands[lang]
 }
 
 func (c *Config) AddRecentFile(path string) {
