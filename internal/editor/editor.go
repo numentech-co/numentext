@@ -57,6 +57,7 @@ type Tab struct {
 
 	BlockSel    BlockSelection
 
+	MarkdownMode bool // true when markdown preview rendering is active
 }
 
 // MaxBookmarks is the maximum number of bookmarks allowed per tab.
@@ -190,6 +191,25 @@ func (e *Editor) SetWordWrap(on bool) {
 
 func (e *Editor) WordWrap() bool {
 	return e.wordWrap
+}
+
+// ToggleMarkdownMode toggles markdown preview mode for the active tab.
+func (e *Editor) ToggleMarkdownMode() {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return
+	}
+	tab.MarkdownMode = !tab.MarkdownMode
+	e.hlVersion++ // force redraw
+}
+
+// IsMarkdownMode returns true if the active tab has markdown preview enabled.
+func (e *Editor) IsMarkdownMode() bool {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return false
+	}
+	return tab.MarkdownMode
 }
 
 // InvalidateHighlightCache forces syntax highlighting to be recomputed on next draw.
@@ -773,6 +793,10 @@ func (e *Editor) OpenFile(filePath string) error {
 	if tab != nil {
 		tab.LineEnding = lineEnding
 		tab.HasBOM = hasBOM
+		// Auto-enable markdown mode for .md/.markdown files
+		if isMarkdownFile(filePath) {
+			tab.MarkdownMode = true
+		}
 	}
 
 	if e.onFileOpen != nil && filePath != "" {
@@ -2695,7 +2719,9 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		line := tab.Buffer.Line(lineIdx)
 		editorX := x + gutterW
 
-		if lineIdx < len(highlighted) {
+		if tab.MarkdownMode && !e.wordWrap {
+			e.drawMarkdownLine(screen, editorX, y+row, width-gutterW, lineIdx, tab)
+		} else if lineIdx < len(highlighted) {
 			// Use tview's tagged text drawing - but we'll manually draw for more control
 			e.drawHighlightedLine(screen, editorX, y+row, width-gutterW, line, highlighted[lineIdx], lineIdx, tab)
 		} else {
@@ -3574,6 +3600,68 @@ func (e *Editor) plainStyleAt(tab *Tab, lineIdx, byteOff int) tcell.Style {
 	return style
 }
 
+// drawMarkdownLine renders a single line with markdown formatting.
+// When the cursor is on this line, markers are shown (styled). Otherwise markers are hidden.
+func (e *Editor) drawMarkdownLine(screen tcell.Screen, x, y, maxWidth int, lineIdx int, tab *Tab) {
+	line := tab.Buffer.Line(lineIdx)
+	cursorOnLine := lineIdx == tab.CursorRow
+	hideMarkers := !cursorOnLine
+	baseStyle := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
+
+	segments := ParseMarkdownLine(line, hideMarkers, baseStyle, lineIdx)
+
+	// Special case: horizontal rule (hideMarkers=true and empty text segment covering whole line)
+	if hideMarkers && len(segments) == 1 && segments[0].Text == "" && isHorizontalRule(strings.TrimSpace(line)) {
+		hrStyle := segments[0].Style
+		for cx := 0; cx < maxWidth; cx++ {
+			screen.SetContent(x+cx, y, '-', nil, hrStyle)
+		}
+		return
+	}
+
+	// Render segments
+	screenCol := 0
+	for _, seg := range segments {
+		for _, ch := range seg.Text {
+			if ch == '\t' {
+				tabW := e.tabSize - (screenCol % e.tabSize)
+				for t := 0; t < tabW; t++ {
+					sx := x + screenCol + t
+					if sx >= x && sx < x+maxWidth {
+						screen.SetContent(sx, y, ' ', nil, seg.Style)
+					}
+				}
+				screenCol += tabW
+				continue
+			}
+			sx := x + screenCol
+			if sx >= x && sx < x+maxWidth {
+				// Apply selection highlighting on top of markdown style
+				finalStyle := seg.Style
+				if tab.HasSelect && e.isSegmentSelected(tab, lineIdx, seg, screenCol, hideMarkers) {
+					finalStyle = finalStyle.Foreground(ui.ColorSelectedText).Background(ui.ColorSelected)
+				}
+				screen.SetContent(sx, y, ch, nil, finalStyle)
+			}
+			screenCol++
+		}
+	}
+}
+
+// isSegmentSelected checks if a visual column position is within the selection.
+// For markdown lines, we need to map visual positions back to buffer positions.
+func (e *Editor) isSegmentSelected(tab *Tab, lineIdx int, seg MarkdownSegment, visualCol int, hideMarkers bool) bool {
+	// Map the visual column back to a buffer column for selection check
+	// When hideMarkers is false, visual == buffer for cursor line
+	if !hideMarkers {
+		return e.isInSelection(tab, lineIdx, seg.BufStart)
+	}
+	// When markers are hidden, we need approximate buffer position
+	// Since we're iterating char by char through seg.Text, the offset within
+	// the visible text maps linearly to BufStart for the segment
+	return e.isInSelection(tab, lineIdx, seg.BufStart)
+}
+
 // hlStyleAt returns the tcell style for a byte offset in a highlighted line.
 func (e *Editor) hlStyleAt(hl HighlightedLine, byteOff int, tab *Tab, lineIdx int) tcell.Style {
 	fg := ui.ColorText
@@ -3916,6 +4004,17 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 			// Single click
 			if e.wordWrap {
 				e.handleWrappedClick(tab, editorX, editorY, bw, gutterW)
+			} else if tab.MarkdownMode && row != tab.CursorRow {
+				// Clicking on a markdown line where markers were hidden:
+				// map visual column to buffer column
+				line := tab.Buffer.Line(row)
+				baseStyle := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
+				segments := ParseMarkdownLine(line, true, baseStyle, row)
+				tab.CursorRow = row
+				tab.CursorCol = VisualToBufferCol(segments, editorX+tab.ScrollCol)
+				e.clampCursor(tab)
+				e.clearSelection(tab)
+				e.notifyChange()
 			} else {
 				tab.CursorRow = row
 				tab.CursorCol = col

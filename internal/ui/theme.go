@@ -64,6 +64,17 @@ var (
 	// Panel focus indicator
 	ColorPanelFocused = tcell.NewRGBColor(255, 255, 85)  // Yellow - active panel border/title
 	ColorPanelBlurred = tcell.NewRGBColor(85, 85, 85)    // Dark gray - inactive panel title
+
+	// Markdown preview colors
+	ColorMarkdownH1     = tcell.NewRGBColor(255, 255, 85)  // Yellow - level 1 headers
+	ColorMarkdownH2     = tcell.NewRGBColor(85, 255, 255)  // Cyan - level 2 headers
+	ColorMarkdownH3     = tcell.NewRGBColor(85, 255, 85)   // Green - level 3 headers
+	ColorMarkdownH4     = tcell.NewRGBColor(255, 170, 85)  // Orange - level 4 headers
+	ColorMarkdownH5     = tcell.NewRGBColor(170, 170, 255) // Light blue - level 5 headers
+	ColorMarkdownH6     = tcell.NewRGBColor(170, 170, 170) // Gray - level 6 headers
+	ColorMarkdownLink   = tcell.NewRGBColor(0, 255, 255)   // Cyan - links
+	ColorMarkdownCode   = tcell.NewRGBColor(255, 170, 85)  // Orange - code spans
+	ColorMarkdownCodeBg = tcell.NewRGBColor(0, 0, 80)      // Dark blue - code background
 )
 
 // ThemeStyle returns a tcell.Style for the given role

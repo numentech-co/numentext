@@ -26,6 +26,7 @@ type StatusBar struct {
 	lineEnding   string // "LF", "CRLF", or "CR"
 	hasBOM       bool
 	venvName     string // active Python venv name (e.g. ".venv")
+	markdownMode bool
 }
 
 func NewStatusBar() *StatusBar {
@@ -86,6 +87,11 @@ func (sb *StatusBar) SetVenvName(name string) {
 	sb.venvName = name
 }
 
+// SetMarkdownMode sets whether the active tab has markdown preview enabled.
+func (sb *StatusBar) SetMarkdownMode(on bool) {
+	sb.markdownMode = on
+}
+
 func (sb *StatusBar) Draw(screen tcell.Screen) {
 	sb.Box.DrawForSubclass(screen, sb)
 	x, y, width, _ := sb.GetInnerRect()
@@ -134,6 +140,9 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 		}
 		if sb.wordWrap {
 			left += " | " + Style.WrapIndicator()
+		}
+		if sb.markdownMode {
+			left += " | MD"
 		}
 	} else if sb.message != "" {
 		left += " " + sb.message
