@@ -68,6 +68,10 @@ type App struct {
 	// Cross-file search results
 	searchResults   []editor.SearchResult
 	searchResultIdx int
+
+	// Annotations panel (TODO/FIXME scanner)
+	annotationsPanel   *editor.AnnotationsPanel
+	annotationsVisible bool
 }
 
 func New() *App {
@@ -107,6 +111,16 @@ func (a *App) setupUI() {
 	a.statusBar.SetWordWrap(a.config.WordWrap)
 	a.fileTree = filetree.New(a.workDir)
 	a.output = output.New()
+	a.annotationsPanel = editor.NewAnnotationsPanel()
+	a.annotationsPanel.SetOnSelect(func(filePath string, line int) {
+		err := a.editor.OpenFile(filePath)
+		if err != nil {
+			a.output.AppendError("Error opening file: " + err.Error())
+			return
+		}
+		a.editor.GoToLine(line)
+		a.focusPanel("editor")
+	})
 	a.termPanel = terminal.NewPanel()
 	a.termPanel.SetOnStatus(func(msg string) {
 		a.statusBar.SetMessage(msg)
@@ -298,6 +312,7 @@ func (a *App) setupMenus() {
 			{Label: "Clear Output", Action: func() {
 				a.output.Clear()
 			}},
+			{Label: "Annotations", Shortcut: "Ctrl+Shift+A", Accel: 'a', Action: a.toggleAnnotations},
 			{Label: "Refresh File Tree", Accel: 'f', Action: func() { a.fileTree.Refresh() }},
 		},
 	}
@@ -588,6 +603,11 @@ func (a *App) setupKeybindings() {
 			case 'h':
 				a.showReplace()
 				return nil
+			case 'a':
+				if shift {
+					a.toggleAnnotations()
+					return nil
+				}
 			case 'b':
 				a.editor.HandleAction(editor.ActionMatchBracket, 0)
 				return nil
@@ -864,6 +884,8 @@ func (a *App) visiblePanels() []string {
 	if a.layout.OutputVisible() {
 		if a.termVisible {
 			panels = append(panels, "terminal")
+		} else if a.annotationsVisible {
+			panels = append(panels, "annotations")
 		} else {
 			panels = append(panels, "output")
 		}
@@ -882,6 +904,8 @@ func panelDisplayName(name string) string {
 		return "Output"
 	case "terminal":
 		return "Terminal"
+	case "annotations":
+		return "Annotations"
 	}
 	return name
 }
@@ -898,6 +922,8 @@ func (a *App) focusPanel(name string) {
 		a.tviewApp.SetFocus(a.output)
 	case "terminal":
 		a.tviewApp.SetFocus(a.termPanel)
+	case "annotations":
+		a.tviewApp.SetFocus(a.annotationsPanel)
 	}
 	a.updatePanelBorders()
 	a.statusBar.SetFocusedPanel(panelDisplayName(name))
@@ -922,6 +948,12 @@ func (a *App) updatePanelBorders() {
 		a.termPanel.SetTitleColor(ui.ColorPanelFocused)
 	} else {
 		a.termPanel.SetTitleColor(ui.ColorPanelBlurred)
+	}
+
+	if a.focusedPanel == "annotations" {
+		a.annotationsPanel.SetTitleColor(ui.ColorPanelFocused)
+	} else {
+		a.annotationsPanel.SetTitleColor(ui.ColorPanelBlurred)
 	}
 }
 
@@ -1141,6 +1173,11 @@ func (a *App) saveFile() {
 				a.applyLintDiagnostics(filePath, result)
 			})
 		}()
+	}
+
+	// Refresh annotations panel if visible
+	if a.annotationsVisible {
+		a.refreshAnnotations()
 	}
 
 	// Refresh file tree in case a new file was saved
@@ -2626,6 +2663,7 @@ func (a *App) openTerminal() {
 		}
 	}
 
+	a.annotationsVisible = false
 	a.bottomFlex.Clear()
 	a.bottomFlex.AddItem(a.termPanel, 0, 1, true)
 	a.termVisible = true
@@ -2806,4 +2844,53 @@ func (a *App) applyBorderStyle() {
 		tview.Borders.BottomRightFocus = '+'
 	}
 	// Modern mode uses tview defaults (Unicode box-drawing)
+}
+
+// toggleAnnotations shows or hides the annotations panel in the bottom area.
+func (a *App) toggleAnnotations() {
+	if a.annotationsVisible {
+		a.closeAnnotations()
+	} else {
+		a.openAnnotations()
+	}
+}
+
+// openAnnotations shows the annotations panel and refreshes its content.
+func (a *App) openAnnotations() {
+	a.refreshAnnotations()
+
+	// Close terminal if visible
+	if a.termVisible {
+		a.closeTerminal()
+	}
+
+	a.bottomFlex.Clear()
+	a.bottomFlex.AddItem(a.annotationsPanel, 0, 1, true)
+	a.annotationsVisible = true
+
+	height := a.config.OutputHeight
+	if height < 8 {
+		height = 8
+	}
+	a.layout.SetOutputVisible(true, height)
+	a.focusPanel("annotations")
+}
+
+// closeAnnotations hides the annotations panel and restores the output panel.
+func (a *App) closeAnnotations() {
+	a.bottomFlex.Clear()
+	a.bottomFlex.AddItem(a.output, 0, 1, false)
+	a.annotationsVisible = false
+
+	// Hide output panel if there is no output content
+	if len(a.output.Lines()) == 0 {
+		a.layout.SetOutputVisible(false, 0)
+	}
+	a.focusPanel("editor")
+}
+
+// refreshAnnotations re-scans all open tabs and updates the panel.
+func (a *App) refreshAnnotations() {
+	anns := editor.ScanAllTabs(a.editor.Tabs())
+	a.annotationsPanel.Update(anns)
 }
