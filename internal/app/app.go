@@ -106,6 +106,10 @@ func New() *App {
 	// Initialize UI style and theme from config
 	ui.InitStyle(a.config.UIStyle, a.config.IconSet)
 	ui.ApplyTheme(a.config.Theme)
+	// Set markdown block colors based on theme brightness
+	r, g, b := ui.ColorBg.RGB()
+	isLight := (int(r)*299+int(g)*587+int(b)*114)/1000 > 128
+	editor.ApplyMarkdownBlockColors(isLight)
 	a.applyBorderStyle()
 
 	a.setupUI()
@@ -3312,6 +3316,11 @@ func (a *App) applyTheme(name string) {
 	a.statusBar.SetBackgroundColor(ui.ColorStatusBg)
 	a.editor.SetBackgroundColor(ui.ColorBg)
 	a.editor.InvalidateHighlightCache()
+
+	// Update markdown block colors for light/dark theme
+	r, g, b := ui.ColorBg.RGB()
+	isLight := (int(r)*299+int(g)*587+int(b)*114)/1000 > 128
+	editor.ApplyMarkdownBlockColors(isLight)
 	a.layout.MainGrid.SetBackgroundColor(ui.ColorBg)
 	a.layout.MiddleFlex.SetBackgroundColor(ui.ColorBg)
 	a.layout.Root.SetBackgroundColor(ui.ColorBg)

@@ -249,4 +249,39 @@ func ApplyTheme(name string) {
 	ColorBorder = t.Border
 	ColorPanelFocused = t.PanelFocused
 	ColorPanelBlurred = t.PanelBlurred
+
+	// Set markdown colors based on theme brightness
+	applyMarkdownColors(t)
+}
+
+// applyMarkdownColors sets markdown preview colors appropriate for the theme.
+func applyMarkdownColors(t *Theme) {
+	r, g, b := t.Bg.RGB()
+	brightness := (int(r)*299 + int(g)*587 + int(b)*114) / 1000
+
+	isLight := brightness > 128
+
+	if isLight {
+		// Light theme
+		ColorMarkdownH1 = tcell.NewRGBColor(180, 0, 0)     // Dark red
+		ColorMarkdownH2 = tcell.NewRGBColor(0, 100, 180)    // Dark blue
+		ColorMarkdownH3 = tcell.NewRGBColor(0, 130, 0)      // Dark green
+		ColorMarkdownH4 = tcell.NewRGBColor(160, 80, 0)     // Dark orange
+		ColorMarkdownH5 = tcell.NewRGBColor(100, 60, 150)   // Purple
+		ColorMarkdownH6 = tcell.NewRGBColor(120, 120, 120)  // Gray
+		ColorMarkdownLink = tcell.NewRGBColor(0, 80, 180)   // Blue
+		ColorMarkdownCode = tcell.NewRGBColor(180, 60, 0)   // Dark orange
+		ColorMarkdownCodeBg = tcell.NewRGBColor(230, 230, 240) // Light gray-blue
+	} else {
+		// Dark theme
+		ColorMarkdownH1 = tcell.NewRGBColor(255, 200, 85)   // Warm yellow
+		ColorMarkdownH2 = tcell.NewRGBColor(85, 200, 255)   // Cyan
+		ColorMarkdownH3 = tcell.NewRGBColor(85, 220, 85)    // Green
+		ColorMarkdownH4 = tcell.NewRGBColor(255, 170, 85)   // Orange
+		ColorMarkdownH5 = tcell.NewRGBColor(170, 170, 255)  // Light blue
+		ColorMarkdownH6 = tcell.NewRGBColor(170, 170, 170)  // Gray
+		ColorMarkdownLink = tcell.NewRGBColor(80, 200, 255) // Bright cyan
+		ColorMarkdownCode = tcell.NewRGBColor(255, 170, 85) // Orange
+		ColorMarkdownCodeBg = tcell.NewRGBColor(30, 30, 50) // Dark blue-gray
+	}
 }

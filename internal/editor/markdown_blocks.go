@@ -582,25 +582,52 @@ func ParseListLine(line string) ListLineInfo {
 
 var (
 	// Fenced code block
-	ColorMarkdownCodeBlockBg = tcell.NewRGBColor(0, 0, 80) // Dark blue tint
+	ColorMarkdownCodeBlockBg = tcell.NewRGBColor(0, 0, 80)
 
 	// Blockquote
-	ColorMarkdownQuoteBorder = tcell.NewRGBColor(0, 170, 170) // Cyan border bar
-	ColorMarkdownQuoteBg     = tcell.NewRGBColor(0, 0, 100)   // Slightly tinted bg
+	ColorMarkdownQuoteBorder = tcell.NewRGBColor(0, 170, 170)
+	ColorMarkdownQuoteBg     = tcell.NewRGBColor(0, 0, 100)
 
 	// Table
-	ColorMarkdownTableBorder = tcell.NewRGBColor(0, 170, 170) // Cyan borders
-	ColorMarkdownTableBg     = tcell.NewRGBColor(0, 0, 90)    // Slight tint
+	ColorMarkdownTableBorder = tcell.NewRGBColor(0, 170, 170)
+	ColorMarkdownTableBg     = tcell.NewRGBColor(0, 0, 90)
 
 	// Frontmatter
-	ColorMarkdownFrontmatterBg  = tcell.NewRGBColor(40, 0, 60)    // Purple tint
-	ColorMarkdownFrontmatterKey = tcell.NewRGBColor(86, 156, 214) // Blue for YAML keys
-	ColorMarkdownFrontmatterVal = tcell.NewRGBColor(206, 145, 120) // Orange for YAML values
+	ColorMarkdownFrontmatterBg  = tcell.NewRGBColor(40, 0, 60)
+	ColorMarkdownFrontmatterKey = tcell.NewRGBColor(86, 156, 214)
+	ColorMarkdownFrontmatterVal = tcell.NewRGBColor(206, 145, 120)
 
 	// List
-	ColorMarkdownBullet   = tcell.NewRGBColor(0, 170, 170)    // Cyan bullets
-	ColorMarkdownCheckbox = tcell.NewRGBColor(85, 255, 85)     // Green for checkboxes
+	ColorMarkdownBullet   = tcell.NewRGBColor(0, 170, 170)
+	ColorMarkdownCheckbox = tcell.NewRGBColor(85, 255, 85)
 )
+
+// ApplyMarkdownBlockColors sets block-level markdown colors for light or dark themes.
+func ApplyMarkdownBlockColors(light bool) {
+	if light {
+		ColorMarkdownCodeBlockBg = tcell.NewRGBColor(235, 235, 245)
+		ColorMarkdownQuoteBorder = tcell.NewRGBColor(0, 100, 180)
+		ColorMarkdownQuoteBg = tcell.NewRGBColor(240, 245, 255)
+		ColorMarkdownTableBorder = tcell.NewRGBColor(150, 150, 170)
+		ColorMarkdownTableBg = tcell.NewRGBColor(245, 245, 250)
+		ColorMarkdownFrontmatterBg = tcell.NewRGBColor(245, 240, 250)
+		ColorMarkdownFrontmatterKey = tcell.NewRGBColor(0, 80, 160)
+		ColorMarkdownFrontmatterVal = tcell.NewRGBColor(160, 80, 0)
+		ColorMarkdownBullet = tcell.NewRGBColor(0, 100, 180)
+		ColorMarkdownCheckbox = tcell.NewRGBColor(0, 140, 0)
+	} else {
+		ColorMarkdownCodeBlockBg = tcell.NewRGBColor(30, 30, 50)
+		ColorMarkdownQuoteBorder = tcell.NewRGBColor(0, 170, 170)
+		ColorMarkdownQuoteBg = tcell.NewRGBColor(15, 15, 40)
+		ColorMarkdownTableBorder = tcell.NewRGBColor(0, 170, 170)
+		ColorMarkdownTableBg = tcell.NewRGBColor(15, 15, 40)
+		ColorMarkdownFrontmatterBg = tcell.NewRGBColor(40, 0, 60)
+		ColorMarkdownFrontmatterKey = tcell.NewRGBColor(86, 156, 214)
+		ColorMarkdownFrontmatterVal = tcell.NewRGBColor(206, 145, 120)
+		ColorMarkdownBullet = tcell.NewRGBColor(0, 170, 170)
+		ColorMarkdownCheckbox = tcell.NewRGBColor(85, 255, 85)
+	}
+}
 
 // IsMarkdownFile returns true if the filename has a markdown extension.
 func IsMarkdownFile(filename string) bool {
