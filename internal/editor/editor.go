@@ -39,7 +39,11 @@ type Tab struct {
 	HasSelect   bool
 	LineEnding  string // "\n", "\r\n", or "\r"
 	HasBOM      bool   // true if file had UTF-8 BOM
+	Bookmarks   map[int]bool // set of bookmarked line indices (0-based)
 }
+
+// MaxBookmarks is the maximum number of bookmarks allowed per tab.
+const MaxBookmarks = 50
 
 // Editor is the core editor component
 type Editor struct {
@@ -877,6 +881,189 @@ func (e *Editor) SetActiveTab(idx int) {
 
 func (e *Editor) TabCount() int {
 	return len(e.tabs)
+}
+
+// ToggleBookmark toggles a bookmark at the current cursor line.
+// Returns true if bookmark was added, false if removed.
+// Returns -1 if at limit and cannot add.
+func (e *Editor) ToggleBookmark() int {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return -1
+	}
+	if tab.Bookmarks == nil {
+		tab.Bookmarks = make(map[int]bool)
+	}
+	line := tab.CursorRow
+	if tab.Bookmarks[line] {
+		delete(tab.Bookmarks, line)
+		return 0 // removed
+	}
+	if len(tab.Bookmarks) >= MaxBookmarks {
+		return -1 // at limit
+	}
+	tab.Bookmarks[line] = true
+	return 1 // added
+}
+
+// ToggleBookmarkAtLine toggles a bookmark at the given 0-based line index.
+func (e *Editor) ToggleBookmarkAtLine(lineIdx int) int {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return -1
+	}
+	if tab.Bookmarks == nil {
+		tab.Bookmarks = make(map[int]bool)
+	}
+	if lineIdx < 0 || lineIdx >= tab.Buffer.LineCount() {
+		return -1
+	}
+	if tab.Bookmarks[lineIdx] {
+		delete(tab.Bookmarks, lineIdx)
+		return 0
+	}
+	if len(tab.Bookmarks) >= MaxBookmarks {
+		return -1
+	}
+	tab.Bookmarks[lineIdx] = true
+	return 1
+}
+
+// HasBookmark returns true if the given line has a bookmark.
+func (e *Editor) HasBookmark(lineIdx int) bool {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return false
+	}
+	return tab.Bookmarks[lineIdx]
+}
+
+// BookmarkCount returns the number of bookmarks in the active tab.
+func (e *Editor) BookmarkCount() int {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return 0
+	}
+	return len(tab.Bookmarks)
+}
+
+// SortedBookmarks returns sorted list of bookmarked line indices for the active tab.
+func (e *Editor) SortedBookmarks() []int {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return nil
+	}
+	return sortedBookmarkLines(tab)
+}
+
+// sortedBookmarkLines returns sorted bookmarked lines for a tab.
+func sortedBookmarkLines(tab *Tab) []int {
+	if len(tab.Bookmarks) == 0 {
+		return nil
+	}
+	lines := make([]int, 0, len(tab.Bookmarks))
+	for line := range tab.Bookmarks {
+		lines = append(lines, line)
+	}
+	// Simple insertion sort (bookmarks are small sets)
+	for i := 1; i < len(lines); i++ {
+		key := lines[i]
+		j := i - 1
+		for j >= 0 && lines[j] > key {
+			lines[j+1] = lines[j]
+			j--
+		}
+		lines[j+1] = key
+	}
+	return lines
+}
+
+// NextBookmark jumps to the next bookmark after cursor. Returns (lineNum 1-based, index 1-based, total) or (0,0,0) if none.
+func (e *Editor) NextBookmark() (int, int, int) {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return 0, 0, 0
+	}
+	lines := sortedBookmarkLines(tab)
+	if len(lines) == 0 {
+		return 0, 0, 0
+	}
+	curLine := tab.CursorRow
+	for i, l := range lines {
+		if l > curLine {
+			tab.CursorRow = l
+			tab.CursorCol = 0
+			e.ensureCursorVisible(tab)
+			e.notifyCursorMove()
+			return l + 1, i + 1, len(lines)
+		}
+	}
+	// Wrap to first
+	tab.CursorRow = lines[0]
+	tab.CursorCol = 0
+	e.ensureCursorVisible(tab)
+	e.notifyCursorMove()
+	return lines[0] + 1, 1, len(lines)
+}
+
+// PrevBookmark jumps to the previous bookmark before cursor. Returns (lineNum 1-based, index 1-based, total) or (0,0,0) if none.
+func (e *Editor) PrevBookmark() (int, int, int) {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return 0, 0, 0
+	}
+	lines := sortedBookmarkLines(tab)
+	if len(lines) == 0 {
+		return 0, 0, 0
+	}
+	curLine := tab.CursorRow
+	for i := len(lines) - 1; i >= 0; i-- {
+		if lines[i] < curLine {
+			tab.CursorRow = lines[i]
+			tab.CursorCol = 0
+			e.ensureCursorVisible(tab)
+			e.notifyCursorMove()
+			return lines[i] + 1, i + 1, len(lines)
+		}
+	}
+	// Wrap to last
+	last := lines[len(lines)-1]
+	tab.CursorRow = last
+	tab.CursorCol = 0
+	e.ensureCursorVisible(tab)
+	e.notifyCursorMove()
+	return last + 1, len(lines), len(lines)
+}
+
+// AllBookmarks returns all bookmarks across all open tabs.
+// Each entry is (tab index, tab name, file path, line index 0-based, line text).
+type BookmarkEntry struct {
+	TabIndex int
+	TabName  string
+	FilePath string
+	Line     int    // 0-based
+	Text     string // content of the line
+}
+
+func (e *Editor) AllBookmarks() []BookmarkEntry {
+	var entries []BookmarkEntry
+	for ti, tab := range e.tabs {
+		lines := sortedBookmarkLines(tab)
+		for _, l := range lines {
+			text := ""
+			if l < tab.Buffer.LineCount() {
+				text = tab.Buffer.Line(l)
+			}
+			entries = append(entries, BookmarkEntry{
+				TabIndex: ti,
+				TabName:  tab.Name,
+				FilePath: tab.FilePath,
+				Line:     l,
+				Text:     text,
+			})
+		}
+	}
+	return entries
 }
 
 // Cursor and editing
@@ -2055,6 +2242,18 @@ func (e *Editor) Draw(screen tcell.Screen) {
 				}
 			}
 
+			// Check for bookmark marker on this line
+			if tab.Bookmarks[lineIdx] {
+				screen.SetContent(x, y+row, '#', nil,
+					tcell.StyleDefault.Foreground(tcell.ColorAqua).Background(ui.ColorGutterBg).Bold(true))
+				for i, ch := range gutterStr {
+					if i > 0 && x+i < x+gutterW {
+						screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
+					}
+				}
+				goto gutterDone
+			}
+
 			for i, ch := range gutterStr {
 				if x+i < x+gutterW {
 					screen.SetContent(x+i, y+row, ch, nil, gutterStyle)
@@ -2192,6 +2391,18 @@ func (e *Editor) drawScrollbar(screen tcell.Screen, x, y, height int, tab *Tab) 
 						tcell.StyleDefault.Foreground(tcell.ColorRed).Background(ui.ColorBgDarker))
 				}
 			}
+		}
+	}
+
+	// Bookmark markers (cyan)
+	for lineIdx := range tab.Bookmarks {
+		if lineIdx < totalLines {
+			markerRow := lineIdx * height / totalLines
+			if markerRow >= height {
+				markerRow = height - 1
+			}
+			screen.SetContent(x, y+markerRow, '#', nil,
+				tcell.StyleDefault.Foreground(tcell.ColorAqua).Background(ui.ColorBgDarker))
 		}
 	}
 }
@@ -2442,6 +2653,18 @@ func (e *Editor) drawGutterForLine(screen tcell.Screen, x, y, gutterW, lineIdx i
 			}
 			return
 		}
+	}
+
+	// Check for bookmark marker
+	if tab.Bookmarks[lineIdx] {
+		screen.SetContent(x, y, '#', nil,
+			tcell.StyleDefault.Foreground(tcell.ColorAqua).Background(ui.ColorGutterBg).Bold(true))
+		for i, ch := range gutterStr {
+			if i > 0 && x+i < x+gutterW {
+				screen.SetContent(x+i, y, ch, nil, gutterStyle)
+			}
+		}
+		return
 	}
 
 	for i, ch := range gutterStr {
@@ -2867,6 +3090,22 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 		}
 		editorX := mx - bx - gutterW
 		editorY := my - by - 1 // -1 for tab bar
+
+		// Adjust for breadcrumb bar in modern mode
+		gutterClickY := editorY
+		if ui.Style.Modern {
+			gutterClickY = editorY - 1 // breadcrumb takes a row
+		}
+
+		// Gutter click: toggle bookmark
+		if editorX < 0 && gutterW > 0 && action == tview.MouseLeftClick {
+			lineIdx := tab.ScrollRow + gutterClickY
+			if lineIdx >= 0 && lineIdx < tab.Buffer.LineCount() {
+				e.ToggleBookmarkAtLine(lineIdx)
+				e.notifyChange()
+			}
+			return true, nil
+		}
 
 		if editorX < 0 {
 			return false, nil

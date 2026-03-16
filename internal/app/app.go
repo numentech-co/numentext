@@ -251,6 +251,11 @@ func (a *App) setupMenus() {
 			{Label: "Go to Line...", Shortcut: "Ctrl+G", Accel: 'l', Action: a.showGoToLine},
 			{Label: "Go to Definition", Shortcut: "F12", Accel: 'd', Action: a.goToDefinition},
 			{Label: "Hover Info", Shortcut: "F11", Action: a.showHover},
+			{Label: "---", Disabled: true},
+			{Label: "Toggle Bookmark", Shortcut: "Ctrl+F2", Accel: 'b', Action: a.toggleBookmark},
+			{Label: "Next Bookmark", Shortcut: "F2", Accel: 'n', Action: a.nextBookmark},
+			{Label: "Prev Bookmark", Shortcut: "Shift+F2", Action: a.prevBookmark},
+			{Label: "All Bookmarks...", Shortcut: "Ctrl+Shift+F2", Action: a.showBookmarksPanel},
 		},
 	}
 
@@ -396,8 +401,9 @@ func (a *App) setupMenus() {
 		Label: "Help",
 		Accel: 'h',
 		Items: []*ui.MenuItem{
+			{Label: "Keyboard Shortcuts", Shortcut: "F1", Accel: 'k', Action: a.showHelpDialog},
+			{Label: "Word Help", Shortcut: "Ctrl+F1", Accel: 'w', Action: a.showCtrlF1Help},
 			{Label: "About NumenText", Action: a.showAbout},
-			{Label: "Keyboard Shortcuts", Accel: 'k', Action: a.showShortcuts},
 		},
 	}
 
@@ -618,6 +624,30 @@ func (a *App) setupKeybindings() {
 			}
 			// Return focus to editor from file tree/output/terminal
 			a.focusPanel("editor")
+			return nil
+		case tcell.KeyF1:
+			if ctrl {
+				// Ctrl+F1: word-under-cursor help (same as F11 hover)
+				a.showCtrlF1Help()
+			} else {
+				// F1: show help dialog
+				a.showHelpDialog()
+			}
+			return nil
+		case tcell.KeyF2:
+			if ctrl && shift {
+				// Ctrl+Shift+F2: show bookmarks panel
+				a.showBookmarksPanel()
+			} else if ctrl {
+				// Ctrl+F2: toggle bookmark
+				a.toggleBookmark()
+			} else if shift {
+				// Shift+F2: previous bookmark
+				a.prevBookmark()
+			} else {
+				// F2: next bookmark
+				a.nextBookmark()
+			}
 			return nil
 		case tcell.KeyF6:
 			a.debugContinue()
@@ -2096,6 +2126,320 @@ func (a *App) showHover() {
 			a.statusBar.SetMessage(content)
 		})
 	}()
+}
+
+// --- Bookmark methods ---
+
+func (a *App) toggleBookmark() {
+	result := a.editor.ToggleBookmark()
+	switch result {
+	case 1:
+		a.statusBar.SetMessage("Bookmark added")
+	case 0:
+		a.statusBar.SetMessage("Bookmark removed")
+	case -1:
+		a.statusBar.SetMessage(fmt.Sprintf("Bookmark limit reached (%d)", editor.MaxBookmarks))
+	}
+}
+
+func (a *App) nextBookmark() {
+	line, idx, total := a.editor.NextBookmark()
+	if total == 0 {
+		a.statusBar.SetMessage("No bookmarks")
+		return
+	}
+	_ = line
+	a.statusBar.SetMessage(fmt.Sprintf("Bookmark %d of %d", idx, total))
+}
+
+func (a *App) prevBookmark() {
+	line, idx, total := a.editor.PrevBookmark()
+	if total == 0 {
+		a.statusBar.SetMessage("No bookmarks")
+		return
+	}
+	_ = line
+	a.statusBar.SetMessage(fmt.Sprintf("Bookmark %d of %d", idx, total))
+}
+
+func (a *App) showBookmarksPanel() {
+	entries := a.editor.AllBookmarks()
+	if len(entries) == 0 {
+		a.statusBar.SetMessage("No bookmarks")
+		return
+	}
+
+	list := tview.NewList()
+	list.SetBackgroundColor(ui.ColorDialogBg)
+	list.SetMainTextColor(ui.ColorTextWhite)
+	list.SetSecondaryTextColor(ui.ColorTextGray)
+	list.SetSelectedTextColor(ui.ColorSelectedText)
+	list.SetSelectedBackgroundColor(ui.ColorSelected)
+	list.ShowSecondaryText(true)
+
+	for _, entry := range entries {
+		lineText := strings.TrimSpace(entry.Text)
+		if len(lineText) > 60 {
+			lineText = lineText[:60] + "..."
+		}
+		// Escape tview color tags
+		lineText = tview.Escape(lineText)
+		primary := fmt.Sprintf("%s:%d", entry.TabName, entry.Line+1)
+		e := entry // capture
+		list.AddItem(primary, "  "+lineText, 0, func() {
+			a.editor.SetActiveTab(e.TabIndex)
+			a.editor.GoToLine(e.Line + 1)
+			a.layout.HideDialog("bookmarks")
+			a.tviewApp.SetFocus(a.editor)
+		})
+	}
+
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			a.layout.HideDialog("bookmarks")
+			a.tviewApp.SetFocus(a.editor)
+			return nil
+		}
+		return event
+	})
+
+	frame := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(list, 0, 1, true)
+	frame.SetBackgroundColor(ui.ColorDialogBg)
+	frame.SetBorder(true)
+	frame.SetBorderColor(ui.ColorStatusText)
+	frame.SetTitle(" Bookmarks ")
+	frame.SetTitleColor(ui.ColorStatusText)
+
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(frame, 20, 0, true).
+			AddItem(nil, 0, 1, false),
+			60, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	a.layout.ShowDialog("bookmarks", modal)
+	a.tviewApp.SetFocus(list)
+}
+
+// --- Help methods ---
+
+func (a *App) showCtrlF1Help() {
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		a.statusBar.SetMessage("No help available for this file type")
+		return
+	}
+	// Check if cursor is on whitespace
+	line := tab.Buffer.Line(tab.CursorRow)
+	col := tab.CursorCol
+	if col >= len(line) || line[col] == ' ' || line[col] == '\t' {
+		return
+	}
+	// Delegate to showHover (same as F11)
+	a.showHover()
+}
+
+func (a *App) showHelpDialog() {
+	// Define all shortcuts grouped by category
+	type shortcutEntry struct {
+		key  string
+		desc string
+	}
+	type category struct {
+		name    string
+		entries []shortcutEntry
+	}
+	categories := []category{
+		{"File", []shortcutEntry{
+			{"Ctrl+N", "New file"},
+			{"Ctrl+O", "Open file"},
+			{"Ctrl+S", "Save"},
+			{"Ctrl+W", "Close tab"},
+			{"Ctrl+Q", "Quit"},
+		}},
+		{"Edit", []shortcutEntry{
+			{"Ctrl+Z", "Undo"},
+			{"Ctrl+Y", "Redo"},
+			{"Ctrl+X", "Cut"},
+			{"Ctrl+C", "Copy"},
+			{"Ctrl+V", "Paste"},
+			{"Ctrl+A", "Select all"},
+			{"Ctrl+D", "Delete line"},
+		}},
+		{"Search", []shortcutEntry{
+			{"Ctrl+F", "Find"},
+			{"Ctrl+H", "Replace"},
+			{"Ctrl+G", "Go to line"},
+			{"Ctrl+B", "Go to matching bracket"},
+			{"Ctrl+P", "File finder"},
+			{"Ctrl+Shift+P", "Command palette"},
+			{"Ctrl+Shift+F", "Search in files"},
+		}},
+		{"Build/Run", []shortcutEntry{
+			{"F5", "Run"},
+			{"F9", "Build"},
+			{"Ctrl+E", "Next build error"},
+			{"Ctrl+Shift+E", "Previous build error"},
+			{"F4", "Next error"},
+			{"Shift+F4", "Previous error"},
+		}},
+		{"Navigation", []shortcutEntry{
+			{"Ctrl+Tab", "Next tab"},
+			{"Ctrl+Shift+Tab", "Previous tab"},
+			{"Ctrl+1-9", "Switch to tab N"},
+			{"Ctrl+]", "Next panel"},
+			{"F10", "Menu bar"},
+		}},
+		{"LSP", []shortcutEntry{
+			{"F11", "Hover info"},
+			{"F12", "Go to definition"},
+			{"Ctrl+F1", "Word help (hover)"},
+		}},
+		{"Debug", []shortcutEntry{
+			{"F5", "Start debug"},
+			{"F6", "Continue"},
+			{"F7", "Step over"},
+			{"F8", "Toggle breakpoint"},
+		}},
+		{"Bookmarks", []shortcutEntry{
+			{"Ctrl+F2", "Toggle bookmark"},
+			{"F2", "Next bookmark"},
+			{"Shift+F2", "Previous bookmark"},
+			{"Ctrl+Shift+F2", "Bookmarks panel"},
+		}},
+		{"Tools", []shortcutEntry{
+			{"Ctrl+`", "Toggle terminal"},
+			{"Ctrl+Shift+I", "Format file"},
+			{"Ctrl+Shift+L", "Lint file"},
+			{"Ctrl+Shift+T", "New terminal session"},
+		}},
+		{"Panel Resize", []shortcutEntry{
+			{"Ctrl+Shift+Left", "Shrink file tree"},
+			{"Ctrl+Shift+Right", "Grow file tree"},
+			{"Ctrl+Shift+Up", "Grow bottom panel"},
+			{"Ctrl+Shift+Down", "Shrink bottom panel"},
+		}},
+		{"Help", []shortcutEntry{
+			{"F1", "Keyboard shortcuts"},
+			{"Ctrl+F1", "Word help"},
+		}},
+	}
+
+	// Build flat list for filtering
+	type flatEntry struct {
+		catName string
+		key     string
+		desc    string
+	}
+	var allEntries []flatEntry
+	for _, cat := range categories {
+		for _, e := range cat.entries {
+			allEntries = append(allEntries, flatEntry{cat.name, e.key, e.desc})
+		}
+	}
+
+	searchInput := tview.NewInputField()
+	searchInput.SetLabel("Search: ")
+	searchInput.SetBackgroundColor(ui.ColorDialogBg)
+	searchInput.SetFieldBackgroundColor(ui.ColorBg)
+	searchInput.SetFieldTextColor(ui.ColorTextWhite)
+	searchInput.SetLabelColor(ui.ColorStatusText)
+
+	textView := tview.NewTextView()
+	textView.SetBackgroundColor(ui.ColorDialogBg)
+	textView.SetTextColor(ui.ColorStatusText)
+	textView.SetDynamicColors(true)
+	textView.SetScrollable(true)
+
+	renderEntries := func(filter string) {
+		var sb strings.Builder
+		filter = strings.ToLower(filter)
+		lastCat := ""
+		count := 0
+		for _, e := range allEntries {
+			if filter != "" {
+				if !strings.Contains(strings.ToLower(e.key), filter) &&
+					!strings.Contains(strings.ToLower(e.desc), filter) &&
+					!strings.Contains(strings.ToLower(e.catName), filter) {
+					continue
+				}
+			}
+			if e.catName != lastCat {
+				if lastCat != "" {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(" [white::b]")
+				sb.WriteString(e.catName)
+				sb.WriteString("[-::-]\n")
+				lastCat = e.catName
+			}
+			sb.WriteString(fmt.Sprintf(" %-20s %s\n", e.key, e.desc))
+			count++
+		}
+		if count == 0 {
+			sb.WriteString("\n No matching shortcuts found.\n")
+		}
+		textView.SetText(sb.String())
+		textView.ScrollToBeginning()
+	}
+
+	renderEntries("")
+
+	searchInput.SetChangedFunc(func(text string) {
+		renderEntries(text)
+	})
+
+	searchInput.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			a.layout.HideDialog("help")
+			a.tviewApp.SetFocus(a.editor)
+			return nil
+		case tcell.KeyDown:
+			// Move focus to text view for scrolling
+			a.tviewApp.SetFocus(textView)
+			return nil
+		}
+		return event
+	})
+
+	textView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			a.layout.HideDialog("help")
+			a.tviewApp.SetFocus(a.editor)
+			return nil
+		case tcell.KeyTab:
+			a.tviewApp.SetFocus(searchInput)
+			return nil
+		}
+		return event
+	})
+
+	layout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(searchInput, 1, 0, true).
+		AddItem(textView, 0, 1, false)
+
+	layout.SetBackgroundColor(ui.ColorDialogBg)
+	layout.SetBorder(true)
+	layout.SetBorderColor(ui.ColorStatusText)
+	layout.SetTitle(" Help - Keyboard Shortcuts (F1) ")
+	layout.SetTitleColor(ui.ColorStatusText)
+
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(layout, 30, 0, true).
+			AddItem(nil, 0, 1, false),
+			50, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	a.layout.ShowDialog("help", modal)
+	a.tviewApp.SetFocus(searchInput)
 }
 
 func (a *App) setupDAP() {
