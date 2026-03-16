@@ -181,7 +181,7 @@ var themes = map[string]*Theme{
 		Selected:     tcell.NewRGBColor(7, 54, 66),
 		SelectedText: tcell.NewRGBColor(253, 246, 227),
 		TreeText:     tcell.NewRGBColor(238, 232, 213),
-		TreeSelected: tcell.NewRGBColor(7, 54, 66),
+		TreeSelected: tcell.NewRGBColor(38, 139, 210),
 		MenuDropBg:   tcell.NewRGBColor(7, 54, 66),
 		MenuDropText: tcell.NewRGBColor(238, 232, 213),
 		MenuHighlight: tcell.NewRGBColor(0, 43, 54),
