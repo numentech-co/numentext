@@ -1074,9 +1074,19 @@ func (a *App) updateStatusBar() {
 // --- Hex View ---
 
 // openFileSmartDetect opens a file, auto-detecting binary files and opening them in hex view.
+// If the file doesn't exist, creates a new tab with that path (vim-like behavior).
 func (a *App) openFileSmartDetect(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// Create new file with this path (vim behavior)
+			parts := strings.Split(path, "/")
+			name := parts[len(parts)-1]
+			a.editor.NewTab(name, path, "")
+			a.output.AppendText("Editing new file " + name)
+			a.tviewApp.SetFocus(a.editor)
+			return
+		}
 		a.output.AppendError("Error opening file: " + err.Error())
 		return
 	}
@@ -3182,7 +3192,7 @@ func (a *App) Run() error {
 	return a.tviewApp.Run()
 }
 
-// cleanup stops all subprocesses with an overall timeout so the app never hangs on exit.
+// cleanup stops all subprocesses with a short timeout so the app exits quickly.
 func (a *App) cleanup() {
 	done := make(chan struct{})
 	go func() {
@@ -3194,24 +3204,12 @@ func (a *App) cleanup() {
 		close(done)
 	}()
 
-	frames := []string{"|", "/", "-", "\\"}
-	tick := time.NewTicker(100 * time.Millisecond)
-	defer tick.Stop()
-	deadline := time.After(2 * time.Second)
-	i := 0
-
-	for {
-		select {
-		case <-done:
-			fmt.Print("\r\033[K") // clear spinner line
-			return
-		case <-deadline:
-			fmt.Print("\r\033[K")
-			return
-		case <-tick.C:
-			fmt.Printf("\r  %s Shutting down...", frames[i%len(frames)])
-			i++
-		}
+	select {
+	case <-done:
+		return
+	case <-time.After(500 * time.Millisecond):
+		// Don't wait forever for LSP/DAP to shut down
+		return
 	}
 }
 

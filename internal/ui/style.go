@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -18,6 +19,7 @@ type UIStyle struct {
 var Style = UIStyle{Modern: true, IconSet: "unicode"}
 
 // InitStyle sets the global style from config values.
+// If running on a basic terminal (TERM=linux, TERM=dumb), falls back to classic/ascii.
 func InitStyle(uiStyle, iconSet string) {
 	Style.Modern = uiStyle != "classic"
 	switch iconSet {
@@ -25,6 +27,15 @@ func InitStyle(uiStyle, iconSet string) {
 		Style.IconSet = iconSet
 	default:
 		Style.IconSet = "unicode"
+	}
+
+	// Auto-detect basic terminals that can't render Unicode
+	term := os.Getenv("TERM")
+	if term == "linux" || term == "dumb" || term == "vt100" || term == "vt220" {
+		Style.Modern = false
+		if Style.IconSet == "unicode" || Style.IconSet == "nerd-font" {
+			Style.IconSet = "ascii"
+		}
 	}
 }
 
