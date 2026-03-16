@@ -207,6 +207,31 @@ func (a *App) setupMenus() {
 			{Label: "Copy", Shortcut: "Ctrl+C", Action: func() { a.editor.HandleAction(editor.ActionCopy, 0) }},
 			{Label: "Paste", Shortcut: "Ctrl+V", Action: func() { a.editor.HandleAction(editor.ActionPaste, 0) }},
 			{Label: "Select All", Shortcut: "Ctrl+A", Accel: 'a', Action: func() { a.editor.HandleAction(editor.ActionSelectAll, 0) }},
+			{Label: "---"},
+			{Label: "Line Endings: LF", Action: func() {
+				a.editor.SetLineEnding(editor.LineEndingLF)
+				a.updateStatusBar()
+			}},
+			{Label: "Line Endings: CRLF", Action: func() {
+				a.editor.SetLineEnding(editor.LineEndingCRLF)
+				a.updateStatusBar()
+			}},
+			{Label: "Line Endings: CR", Action: func() {
+				a.editor.SetLineEnding(editor.LineEndingCR)
+				a.updateStatusBar()
+			}},
+			{Label: "---"},
+			{Label: "Toggle UTF-8 BOM", Action: func() {
+				a.editor.SetBOM(!a.editor.HasBOM())
+				a.updateStatusBar()
+			}},
+			{Label: "---"},
+			{Label: "Convert Tabs to Spaces", Action: func() {
+				a.editor.ConvertTabsToSpaces()
+			}},
+			{Label: "Convert Spaces to Tabs", Action: func() {
+				a.editor.ConvertSpacesToTabs()
+			}},
 		},
 	}
 
@@ -877,6 +902,8 @@ func (a *App) updateStatusBar() {
 	tab := a.editor.ActiveTab()
 	if tab != nil {
 		a.statusBar.Update(tab.Name, tab.CursorRow, tab.CursorCol, tab.Highlighter.Language(), tab.Buffer.Modified())
+		a.statusBar.SetLineEnding(a.editor.LineEndingLabel())
+		a.statusBar.SetHasBOM(a.editor.HasBOM())
 		// Show build error info if navigating errors, otherwise show diagnostic
 		if len(a.buildErrors) > 0 && a.buildErrorIdx >= 0 && a.buildErrorIdx < len(a.buildErrors) {
 			be := a.buildErrors[a.buildErrorIdx]

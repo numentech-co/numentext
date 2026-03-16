@@ -16,6 +16,13 @@ import (
 	"numentext/internal/ui"
 )
 
+// Line ending constants
+const (
+	LineEndingLF   = "\n"
+	LineEndingCRLF = "\r\n"
+	LineEndingCR   = "\r"
+)
+
 // Tab represents an open file tab
 type Tab struct {
 	Name        string
@@ -29,6 +36,8 @@ type Tab struct {
 	SelectStart [2]int // row, col (-1 = no selection)
 	SelectEnd   [2]int
 	HasSelect   bool
+	LineEnding  string // "\n", "\r\n", or "\r"
+	HasBOM      bool   // true if file had UTF-8 BOM
 }
 
 // Editor is the core editor component
@@ -139,6 +148,124 @@ func (e *Editor) SetTabSize(size int) {
 		size = 1
 	}
 	e.tabSize = size
+}
+
+// TabSize returns the configured tab size.
+func (e *Editor) TabSize() int {
+	return e.tabSize
+}
+
+// LineEndingLabel returns a display label for the active tab's line ending (LF, CRLF, CR).
+func (e *Editor) LineEndingLabel() string {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return ""
+	}
+	switch tab.LineEnding {
+	case LineEndingCRLF:
+		return "CRLF"
+	case LineEndingCR:
+		return "CR"
+	default:
+		return "LF"
+	}
+}
+
+// SetLineEnding changes the line ending for the active tab.
+func (e *Editor) SetLineEnding(le string) {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return
+	}
+	tab.LineEnding = le
+	tab.Buffer.SetModified(true)
+	e.notifyChange()
+}
+
+// HasBOM returns whether the active tab has a UTF-8 BOM.
+func (e *Editor) HasBOM() bool {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return false
+	}
+	return tab.HasBOM
+}
+
+// SetBOM sets or clears the UTF-8 BOM for the active tab.
+func (e *Editor) SetBOM(hasBOM bool) {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return
+	}
+	tab.HasBOM = hasBOM
+	tab.Buffer.SetModified(true)
+	e.notifyChange()
+}
+
+// ConvertTabsToSpaces converts tab characters to spaces in the buffer.
+// If there is a selection, only converts within the selection; otherwise converts entire file.
+func (e *Editor) ConvertTabsToSpaces() {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return
+	}
+	spaces := strings.Repeat(" ", e.tabSize)
+	if tab.HasSelect {
+		startRow, endRow := tab.SelectStart[0], tab.SelectEnd[0]
+		if startRow > endRow {
+			startRow, endRow = endRow, startRow
+		}
+		for row := startRow; row <= endRow && row < tab.Buffer.LineCount(); row++ {
+			line := tab.Buffer.Line(row)
+			newLine := strings.ReplaceAll(line, "\t", spaces)
+			if newLine != line {
+				tab.Buffer.ReplaceLine(row, newLine)
+			}
+		}
+	} else {
+		for row := 0; row < tab.Buffer.LineCount(); row++ {
+			line := tab.Buffer.Line(row)
+			newLine := strings.ReplaceAll(line, "\t", spaces)
+			if newLine != line {
+				tab.Buffer.ReplaceLine(row, newLine)
+			}
+		}
+	}
+	e.hlVersion++
+	e.notifyChange()
+}
+
+// ConvertSpacesToTabs converts runs of tabSize spaces to tab characters.
+// If there is a selection, only converts within the selection; otherwise converts entire file.
+func (e *Editor) ConvertSpacesToTabs() {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return
+	}
+	spaces := strings.Repeat(" ", e.tabSize)
+	if tab.HasSelect {
+		startRow, endRow := tab.SelectStart[0], tab.SelectEnd[0]
+		if startRow > endRow {
+			startRow, endRow = endRow, startRow
+		}
+		for row := startRow; row <= endRow && row < tab.Buffer.LineCount(); row++ {
+			line := tab.Buffer.Line(row)
+			newLine := strings.ReplaceAll(line, spaces, "\t")
+			if newLine != line {
+				tab.Buffer.ReplaceLine(row, newLine)
+			}
+		}
+	} else {
+		for row := 0; row < tab.Buffer.LineCount(); row++ {
+			line := tab.Buffer.Line(row)
+			newLine := strings.ReplaceAll(line, spaces, "\t")
+			if newLine != line {
+				tab.Buffer.ReplaceLine(row, newLine)
+			}
+		}
+	}
+	e.hlVersion++
+	e.notifyChange()
 }
 
 // byteOffsetToScreenCol converts a byte offset in a line to its screen column,
@@ -510,6 +637,11 @@ func (e *Editor) acceptCompletion() {
 func (e *Editor) NewTab(name, filePath string, content string) {
 	buf := NewBufferFromText(content)
 	hl := NewHighlighter(filePath)
+	// Default line ending: platform-dependent
+	defaultLE := LineEndingLF
+	if runtime.GOOS == "windows" {
+		defaultLE = LineEndingCRLF
+	}
 	tab := &Tab{
 		Name:        name,
 		FilePath:    filePath,
@@ -517,6 +649,7 @@ func (e *Editor) NewTab(name, filePath string, content string) {
 		Highlighter: hl,
 		SelectStart: [2]int{-1, -1},
 		SelectEnd:   [2]int{-1, -1},
+		LineEnding:  defaultLE,
 	}
 	e.tabs = append(e.tabs, tab)
 	e.activeTab = len(e.tabs) - 1
@@ -538,18 +671,62 @@ func (e *Editor) OpenFile(filePath string) error {
 	if err != nil {
 		return err
 	}
+
+	// Detect UTF-8 BOM
+	hasBOM := false
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		hasBOM = true
+		data = data[3:] // strip BOM from content
+	}
+
 	content := string(data)
-	// Normalize line endings
+
+	// Detect line endings from raw content before normalizing
+	lineEnding := detectLineEnding(content)
+
+	// Normalize line endings for internal buffer
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	content = strings.ReplaceAll(content, "\r", "\n")
 
 	parts := strings.Split(filePath, "/")
 	name := parts[len(parts)-1]
 	e.NewTab(name, filePath, content)
+
+	// Set detected line ending and BOM on the new tab
+	tab := e.ActiveTab()
+	if tab != nil {
+		tab.LineEnding = lineEnding
+		tab.HasBOM = hasBOM
+	}
+
 	if e.onFileOpen != nil && filePath != "" {
 		e.onFileOpen(filePath, content)
 	}
 	return nil
+}
+
+// detectLineEnding examines content and returns the detected line ending.
+// Checks the first few KB for \r\n, \r, or \n.
+func detectLineEnding(content string) string {
+	// Only scan first 8KB for performance
+	scan := content
+	if len(scan) > 8192 {
+		scan = scan[:8192]
+	}
+
+	crlfCount := strings.Count(scan, "\r\n")
+	// Count standalone \r (not part of \r\n)
+	crCount := strings.Count(scan, "\r") - crlfCount
+	lfCount := strings.Count(scan, "\n") - crlfCount
+
+	if crlfCount > lfCount && crlfCount > crCount {
+		return LineEndingCRLF
+	}
+	if crCount > lfCount && crCount > crlfCount {
+		return LineEndingCR
+	}
+	// Default to LF (platform default set in NewTab for new files)
+	return LineEndingLF
 }
 
 func (e *Editor) SaveCurrentFile() error {
@@ -557,8 +734,25 @@ func (e *Editor) SaveCurrentFile() error {
 	if tab == nil || tab.FilePath == "" {
 		return fmt.Errorf("no file path")
 	}
+	// Buffer stores lines joined by \n internally
 	content := tab.Buffer.Text()
-	err := os.WriteFile(tab.FilePath, []byte(content), 0644)
+
+	// Convert to tab's line ending format
+	if tab.LineEnding == LineEndingCRLF {
+		content = strings.ReplaceAll(content, "\n", "\r\n")
+	} else if tab.LineEnding == LineEndingCR {
+		content = strings.ReplaceAll(content, "\n", "\r")
+	}
+
+	var data []byte
+	// Prepend BOM if needed
+	if tab.HasBOM {
+		data = append([]byte{0xEF, 0xBB, 0xBF}, []byte(content)...)
+	} else {
+		data = []byte(content)
+	}
+
+	err := os.WriteFile(tab.FilePath, data, 0644)
 	if err != nil {
 		return err
 	}
@@ -589,7 +783,18 @@ func (e *Editor) ReloadCurrentFile() error {
 	if err != nil {
 		return err
 	}
-	tab.Buffer.SetText(string(data))
+
+	// Detect BOM
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		tab.HasBOM = true
+		data = data[3:]
+	} else {
+		tab.HasBOM = false
+	}
+
+	content := string(data)
+	tab.LineEnding = detectLineEnding(content)
+	tab.Buffer.SetText(content)
 	tab.Buffer.SetModified(false)
 	e.hlVersion++
 	e.notifyChange()

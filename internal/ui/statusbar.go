@@ -23,6 +23,8 @@ type StatusBar struct {
 	focusedPanel string // name of currently focused panel
 	wordWrap     bool
 	hasErrors    bool
+	lineEnding   string // "LF", "CRLF", or "CR"
+	hasBOM       bool
 }
 
 func NewStatusBar() *StatusBar {
@@ -70,6 +72,14 @@ func (sb *StatusBar) SetHasErrors(has bool) {
 	sb.hasErrors = has
 }
 
+func (sb *StatusBar) SetLineEnding(le string) {
+	sb.lineEnding = le
+}
+
+func (sb *StatusBar) SetHasBOM(has bool) {
+	sb.hasBOM = has
+}
+
 func (sb *StatusBar) Draw(screen tcell.Screen) {
 	sb.Box.DrawForSubclass(screen, sb)
 	x, y, width, _ := sb.GetInnerRect()
@@ -110,6 +120,12 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 			left += " | " + sb.language
 		}
 		left += " | " + sb.encoding
+		if sb.hasBOM {
+			left += " BOM"
+		}
+		if sb.lineEnding != "" {
+			left += " | " + sb.lineEnding
+		}
 		if sb.wordWrap {
 			left += " | " + Style.WrapIndicator()
 		}
