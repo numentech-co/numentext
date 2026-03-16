@@ -3232,13 +3232,12 @@ func (a *App) applyTheme(name string) {
 	ui.ApplyTheme(name)
 	_ = a.config.Save()
 
-	// Refresh colors on all panels
+	// Refresh colors on all panels (preserves file tree expanded state)
 	a.fileTree.RefreshColors()
 	a.output.RefreshColors()
 	a.menuBar.SetBackgroundColor(ui.ColorMenuBg)
 	a.statusBar.SetBackgroundColor(ui.ColorStatusBg)
 	a.editor.SetBackgroundColor(ui.ColorBg)
-	a.fileTree.Refresh()
 }
 
 func (a *App) applyBorderStyle() {
