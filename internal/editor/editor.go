@@ -192,6 +192,12 @@ func (e *Editor) WordWrap() bool {
 	return e.wordWrap
 }
 
+// InvalidateHighlightCache forces syntax highlighting to be recomputed on next draw.
+func (e *Editor) InvalidateHighlightCache() {
+	e.hlVersion++
+	e.cachedHL = nil
+}
+
 // SetTabSize sets the tab display width
 func (e *Editor) SetTabSize(size int) {
 	if size < 1 {

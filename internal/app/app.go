@@ -3305,6 +3305,7 @@ func (a *App) applyTheme(name string) {
 	a.menuBar.SetBackgroundColor(ui.ColorMenuBg)
 	a.statusBar.SetBackgroundColor(ui.ColorStatusBg)
 	a.editor.SetBackgroundColor(ui.ColorBg)
+	a.editor.InvalidateHighlightCache()
 	a.layout.MainGrid.SetBackgroundColor(ui.ColorBg)
 	a.layout.MiddleFlex.SetBackgroundColor(ui.ColorBg)
 	a.layout.Root.SetBackgroundColor(ui.ColorBg)
