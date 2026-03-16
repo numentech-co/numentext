@@ -85,6 +85,8 @@ type DialogResult struct {
 	Text      string
 	Text2     string // For replace dialog (replace with)
 	FilePath  string
+	UseRegex  bool   // Whether regex mode is enabled
+	AllFiles  bool   // Whether to search/replace across all open files
 }
 
 // OpenFileDialog creates a file open dialog
@@ -255,6 +257,8 @@ func SaveFileDialog(app *tview.Application, currentPath string, onResult func(Di
 
 // FindDialog creates a find dialog
 func FindDialog(app *tview.Application, onResult func(DialogResult)) tview.Primitive {
+	useRegex := false
+
 	form := tview.NewForm()
 	form.SetBackgroundColor(ColorDialogBg)
 	form.SetFieldBackgroundColor(ColorBg)
@@ -268,9 +272,12 @@ func FindDialog(app *tview.Application, onResult func(DialogResult)) tview.Primi
 	form.SetTitleColor(ColorStatusText)
 
 	form.AddInputField("Search:", "", 40, nil, nil)
+	form.AddCheckbox("Regex:", false, func(checked bool) {
+		useRegex = checked
+	})
 	form.AddButton("Find Next", func() {
 		text := form.GetFormItemByLabel("Search:").(*tview.InputField).GetText()
-		onResult(DialogResult{Confirmed: true, Text: text})
+		onResult(DialogResult{Confirmed: true, Text: text, UseRegex: useRegex})
 	})
 	form.AddButton("Close", func() {
 		onResult(DialogResult{Confirmed: false})
@@ -284,11 +291,14 @@ func FindDialog(app *tview.Application, onResult func(DialogResult)) tview.Primi
 		return event
 	})
 
-	return wrapDialogWithShadow(form, 55, 7)
+	return wrapDialogWithShadow(form, 55, 9)
 }
 
 // ReplaceDialog creates a find & replace dialog
 func ReplaceDialog(app *tview.Application, onFind func(DialogResult), onReplace func(DialogResult), onReplaceAll func(DialogResult), onClose func()) tview.Primitive {
+	useRegex := false
+	allFiles := false
+
 	form := tview.NewForm()
 	form.SetBackgroundColor(ColorDialogBg)
 	form.SetFieldBackgroundColor(ColorBg)
@@ -303,19 +313,25 @@ func ReplaceDialog(app *tview.Application, onFind func(DialogResult), onReplace 
 
 	form.AddInputField("Find:", "", 40, nil, nil)
 	form.AddInputField("Replace:", "", 40, nil, nil)
+	form.AddCheckbox("Regex:", false, func(checked bool) {
+		useRegex = checked
+	})
+	form.AddCheckbox("All files:", false, func(checked bool) {
+		allFiles = checked
+	})
 	form.AddButton("Find", func() {
 		find := form.GetFormItemByLabel("Find:").(*tview.InputField).GetText()
-		onFind(DialogResult{Confirmed: true, Text: find})
+		onFind(DialogResult{Confirmed: true, Text: find, UseRegex: useRegex, AllFiles: allFiles})
 	})
 	form.AddButton("Replace", func() {
 		find := form.GetFormItemByLabel("Find:").(*tview.InputField).GetText()
 		replace := form.GetFormItemByLabel("Replace:").(*tview.InputField).GetText()
-		onReplace(DialogResult{Confirmed: true, Text: find, Text2: replace})
+		onReplace(DialogResult{Confirmed: true, Text: find, Text2: replace, UseRegex: useRegex, AllFiles: allFiles})
 	})
 	form.AddButton("Replace All", func() {
 		find := form.GetFormItemByLabel("Find:").(*tview.InputField).GetText()
 		replace := form.GetFormItemByLabel("Replace:").(*tview.InputField).GetText()
-		onReplaceAll(DialogResult{Confirmed: true, Text: find, Text2: replace})
+		onReplaceAll(DialogResult{Confirmed: true, Text: find, Text2: replace, UseRegex: useRegex, AllFiles: allFiles})
 	})
 	form.AddButton("Close", func() {
 		onClose()
@@ -329,7 +345,7 @@ func ReplaceDialog(app *tview.Application, onFind func(DialogResult), onReplace 
 		return event
 	})
 
-	return wrapDialogWithShadow(form, 60, 9)
+	return wrapDialogWithShadow(form, 60, 13)
 }
 
 // GoToLineDialog creates a go-to-line dialog

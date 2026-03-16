@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"unicode"
@@ -1583,8 +1584,13 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 	}
 }
 
-// Find searches for text and positions cursor
+// Find searches for text and positions cursor (literal case-insensitive search)
 func (e *Editor) Find(query string, forward bool) bool {
+	return e.FindWithOptions(query, forward, false)
+}
+
+// FindWithOptions searches for text with optional regex mode
+func (e *Editor) FindWithOptions(query string, forward bool, useRegex bool) bool {
 	tab := e.ActiveTab()
 	if tab == nil {
 		return false
@@ -1603,6 +1609,14 @@ func (e *Editor) Find(query string, forward bool) bool {
 		startCol++
 	}
 
+	if useRegex {
+		return e.findRegex(tab, query, forward, startRow, startCol)
+	}
+	return e.findLiteral(tab, query, forward, startRow, startCol)
+}
+
+// findLiteral performs case-insensitive literal search
+func (e *Editor) findLiteral(tab *Tab, query string, forward bool, startRow, startCol int) bool {
 	lowerQuery := strings.ToLower(query)
 
 	if forward {
@@ -1647,38 +1661,149 @@ func (e *Editor) Find(query string, forward bool) bool {
 	return false
 }
 
-// Replace replaces selected text and finds next
+// findRegex performs regex search
+func (e *Editor) findRegex(tab *Tab, pattern string, forward bool, startRow, startCol int) bool {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		if e.onStatusMessage != nil {
+			e.onStatusMessage("Regex error: " + err.Error())
+		}
+		return false
+	}
+
+	if forward {
+		for r := startRow; r < tab.Buffer.LineCount(); r++ {
+			line := tab.Buffer.Line(r)
+			sc := 0
+			if r == startRow {
+				sc = startCol
+			}
+			if sc > len(line) {
+				continue
+			}
+			loc := re.FindStringIndex(line[sc:])
+			if loc != nil {
+				matchStart := sc + loc[0]
+				matchEnd := sc + loc[1]
+				tab.CursorRow = r
+				tab.CursorCol = matchStart
+				tab.HasSelect = true
+				tab.SelectStart = [2]int{r, matchStart}
+				tab.SelectEnd = [2]int{r, matchEnd}
+				e.ensureCursorVisible(tab)
+				e.notifyChange()
+				return true
+			}
+		}
+		// Wrap around
+		for r := 0; r <= startRow; r++ {
+			line := tab.Buffer.Line(r)
+			loc := re.FindStringIndex(line)
+			if loc != nil {
+				tab.CursorRow = r
+				tab.CursorCol = loc[0]
+				tab.HasSelect = true
+				tab.SelectStart = [2]int{r, loc[0]}
+				tab.SelectEnd = [2]int{r, loc[1]}
+				e.ensureCursorVisible(tab)
+				e.notifyChange()
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// FindRegexError checks if a regex pattern is valid and returns the error if not
+func (e *Editor) FindRegexError(pattern string) error {
+	_, err := regexp.Compile(pattern)
+	return err
+}
+
+// Replace replaces selected text and finds next (literal mode)
 func (e *Editor) Replace(find, replace string) bool {
+	return e.ReplaceWithOptions(find, replace, false)
+}
+
+// ReplaceWithOptions replaces selected text and finds next with optional regex mode
+func (e *Editor) ReplaceWithOptions(find, replace string, useRegex bool) bool {
 	tab := e.ActiveTab()
 	if tab == nil {
 		return false
 	}
 	if tab.HasSelect {
 		sel := e.selectedText(tab)
-		if strings.EqualFold(sel, find) {
+		doReplace := false
+		actualReplace := replace
+
+		if useRegex {
+			re, err := regexp.Compile(find)
+			if err == nil && re.MatchString(sel) {
+				doReplace = true
+				// Apply capture group substitution
+				actualReplace = re.ReplaceAllString(sel, replace)
+			}
+		} else {
+			if strings.EqualFold(sel, find) {
+				doReplace = true
+			}
+		}
+
+		if doReplace {
 			e.deleteSelection(tab)
 			cursor := [2]int{tab.CursorRow, tab.CursorCol}
-			newPos := tab.Buffer.Insert(tab.CursorRow, tab.CursorCol, replace, cursor)
+			newPos := tab.Buffer.Insert(tab.CursorRow, tab.CursorCol, actualReplace, cursor)
 			tab.CursorRow = newPos[0]
 			tab.CursorCol = newPos[1]
 		}
 	}
-	return e.Find(find, true)
+	return e.FindWithOptions(find, true, useRegex)
 }
 
-// ReplaceAll replaces all occurrences
+// ReplaceAll replaces all occurrences (literal mode)
 func (e *Editor) ReplaceAll(find, replace string) int {
+	return e.ReplaceAllWithOptions(find, replace, false)
+}
+
+// ReplaceAllWithOptions replaces all occurrences with optional regex mode
+func (e *Editor) ReplaceAllWithOptions(find, replace string, useRegex bool) int {
 	tab := e.ActiveTab()
 	if tab == nil {
 		return 0
 	}
+	return e.replaceAllInTab(tab, find, replace, useRegex)
+}
+
+// replaceAllInTab replaces all occurrences in a specific tab
+func (e *Editor) replaceAllInTab(tab *Tab, find, replace string, useRegex bool) int {
 	text := tab.Buffer.Text()
-	count := strings.Count(strings.ToLower(text), strings.ToLower(find))
-	if count == 0 {
-		return 0
+
+	var newText string
+	var count int
+
+	if useRegex {
+		re, err := regexp.Compile(find)
+		if err != nil {
+			if e.onStatusMessage != nil {
+				e.onStatusMessage("Regex error: " + err.Error())
+			}
+			return 0
+		}
+		matches := re.FindAllStringIndex(text, -1)
+		count = len(matches)
+		if count == 0 {
+			return 0
+		}
+		newText = re.ReplaceAllString(text, replace)
+	} else {
+		count = strings.Count(strings.ToLower(text), strings.ToLower(find))
+		if count == 0 {
+			return 0
+		}
+		newText = caseInsensitiveReplace(text, find, replace)
 	}
-	// Simple case-insensitive replace
-	newText := caseInsensitiveReplace(text, find, replace)
+
 	tab.Buffer = NewBufferFromText(newText)
 	tab.Buffer.SetModified(true)
 	tab.CursorRow = 0
@@ -1686,6 +1811,95 @@ func (e *Editor) ReplaceAll(find, replace string) int {
 	e.clearSelection(tab)
 	e.notifyChange()
 	return count
+}
+
+// ReplaceAllInAllFiles replaces all occurrences across all open tabs
+// Returns a map of filename -> replacement count
+func (e *Editor) ReplaceAllInAllFiles(find, replace string, useRegex bool) map[string]int {
+	results := make(map[string]int)
+	for _, tab := range e.tabs {
+		count := e.replaceAllInTab(tab, find, replace, useRegex)
+		if count > 0 {
+			name := tab.Name
+			if tab.FilePath != "" {
+				name = tab.FilePath
+			}
+			results[name] = count
+		}
+	}
+	e.notifyChange()
+	return results
+}
+
+// SearchResult represents a single search match across files
+type SearchResult struct {
+	FilePath string
+	TabIndex int
+	Line     int // 0-based
+	Col      int // 0-based
+	MatchLen int
+	LineText string
+}
+
+// FindAllFiles searches across all open tabs and returns grouped results
+func (e *Editor) FindAllFiles(query string, useRegex bool) ([]SearchResult, error) {
+	if query == "" {
+		return nil, nil
+	}
+
+	var re *regexp.Regexp
+	var err error
+	if useRegex {
+		re, err = regexp.Compile(query)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var results []SearchResult
+	lowerQuery := strings.ToLower(query)
+
+	for tabIdx, tab := range e.tabs {
+		name := tab.Name
+		if tab.FilePath != "" {
+			name = tab.FilePath
+		}
+		for r := 0; r < tab.Buffer.LineCount(); r++ {
+			line := tab.Buffer.Line(r)
+			if useRegex {
+				locs := re.FindAllStringIndex(line, -1)
+				for _, loc := range locs {
+					results = append(results, SearchResult{
+						FilePath: name,
+						TabIndex: tabIdx,
+						Line:     r,
+						Col:      loc[0],
+						MatchLen: loc[1] - loc[0],
+						LineText: line,
+					})
+				}
+			} else {
+				lowerLine := strings.ToLower(line)
+				offset := 0
+				for {
+					idx := strings.Index(lowerLine[offset:], lowerQuery)
+					if idx < 0 {
+						break
+					}
+					results = append(results, SearchResult{
+						FilePath: name,
+						TabIndex: tabIdx,
+						Line:     r,
+						Col:      offset + idx,
+						MatchLen: len(query),
+						LineText: line,
+					})
+					offset += idx + len(query)
+				}
+			}
+		}
+	}
+	return results, nil
 }
 
 func caseInsensitiveReplace(s, old, new string) string {

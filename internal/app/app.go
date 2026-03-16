@@ -64,6 +64,10 @@ type App struct {
 	buildErrors      []runner.BuildError
 	buildErrorIdx    int  // current error index (0-based), -1 if none
 	navigatingErrors bool // true while jumping to an error (suppresses clear)
+
+	// Cross-file search results
+	searchResults   []editor.SearchResult
+	searchResultIdx int
 }
 
 func New() *App {
@@ -71,7 +75,8 @@ func New() *App {
 		tviewApp:      tview.NewApplication(),
 		runner:        runner.New(),
 		config:        config.Load(),
-		buildErrorIdx: -1,
+		buildErrorIdx:   -1,
+		searchResultIdx: -1,
 	}
 
 	a.workDir, _ = os.Getwd()
@@ -581,10 +586,20 @@ func (a *App) setupKeybindings() {
 				a.editor.HandleAction(editor.ActionMatchBracket, 0)
 				return nil
 			case 'e':
-				if shift {
-					a.prevBuildError()
+				if len(a.buildErrors) > 0 {
+					if shift {
+						a.prevBuildError()
+					} else {
+						a.nextBuildError()
+					}
+				} else if len(a.searchResults) > 0 {
+					if shift {
+						a.prevSearchResult()
+					} else {
+						a.nextSearchResult()
+					}
 				} else {
-					a.nextBuildError()
+					a.statusBar.SetMessage("No errors or search results")
 				}
 				return nil
 			}
@@ -1353,7 +1368,13 @@ func (a *App) quit() {
 func (a *App) showFind() {
 	dialog := ui.FindDialog(a.tviewApp, func(result ui.DialogResult) {
 		if result.Confirmed {
-			found := a.editor.Find(result.Text, true)
+			if result.UseRegex {
+				if err := a.editor.FindRegexError(result.Text); err != nil {
+					a.statusBar.SetMessage("Regex error: " + err.Error())
+					return
+				}
+			}
+			found := a.editor.FindWithOptions(result.Text, true, result.UseRegex)
 			if !found {
 				a.statusBar.SetMessage("Not found: " + result.Text)
 			}
@@ -1369,19 +1390,42 @@ func (a *App) showReplace() {
 	dialog := ui.ReplaceDialog(a.tviewApp,
 		func(result ui.DialogResult) {
 			// Find
-			found := a.editor.Find(result.Text, true)
-			if !found {
-				a.statusBar.SetMessage("Not found: " + result.Text)
+			if result.UseRegex {
+				if err := a.editor.FindRegexError(result.Text); err != nil {
+					a.statusBar.SetMessage("Regex error: " + err.Error())
+					return
+				}
+			}
+			if result.AllFiles {
+				a.findAllFiles(result.Text, result.UseRegex)
+			} else {
+				found := a.editor.FindWithOptions(result.Text, true, result.UseRegex)
+				if !found {
+					a.statusBar.SetMessage("Not found: " + result.Text)
+				}
 			}
 		},
 		func(result ui.DialogResult) {
 			// Replace
-			a.editor.Replace(result.Text, result.Text2)
+			a.editor.ReplaceWithOptions(result.Text, result.Text2, result.UseRegex)
 		},
 		func(result ui.DialogResult) {
 			// Replace All
-			count := a.editor.ReplaceAll(result.Text, result.Text2)
-			a.statusBar.SetMessage(fmt.Sprintf("Replaced %d occurrences", count))
+			if result.AllFiles {
+				counts := a.editor.ReplaceAllInAllFiles(result.Text, result.Text2, result.UseRegex)
+				total := 0
+				for _, c := range counts {
+					total += c
+				}
+				if total == 0 {
+					a.statusBar.SetMessage("No matches found")
+				} else {
+					a.statusBar.SetMessage(fmt.Sprintf("Replaced %d occurrences in %d files", total, len(counts)))
+				}
+			} else {
+				count := a.editor.ReplaceAllWithOptions(result.Text, result.Text2, result.UseRegex)
+				a.statusBar.SetMessage(fmt.Sprintf("Replaced %d occurrences", count))
+			}
 		},
 		func() {
 			// Close
@@ -1390,6 +1434,98 @@ func (a *App) showReplace() {
 		},
 	)
 	a.layout.ShowDialog("replace", dialog)
+}
+
+// findAllFiles searches across all open tabs and displays results in the output panel
+func (a *App) findAllFiles(query string, useRegex bool) {
+	results, err := a.editor.FindAllFiles(query, useRegex)
+	if err != nil {
+		a.statusBar.SetMessage("Regex error: " + err.Error())
+		return
+	}
+	if len(results) == 0 {
+		a.statusBar.SetMessage("No matches found across files")
+		return
+	}
+
+	// Store results for navigation
+	a.searchResults = results
+	a.searchResultIdx = -1
+
+	// Display results in output panel
+	a.output.Clear()
+	a.output.AppendText(fmt.Sprintf("[#00ffff]Search results for: %s (%d matches)[-]", tview.Escape(query), len(results)))
+
+	currentFile := ""
+	for i, r := range results {
+		if r.FilePath != currentFile {
+			currentFile = r.FilePath
+			a.output.AppendText(fmt.Sprintf("\n[yellow]%s[-]", tview.Escape(currentFile)))
+		}
+		linePreview := r.LineText
+		if len(linePreview) > 80 {
+			linePreview = linePreview[:80] + "..."
+		}
+		a.output.AppendText(fmt.Sprintf("  [white]%d:[-] Ln %d, Col %d: %s",
+			i+1, r.Line+1, r.Col+1, tview.Escape(linePreview)))
+	}
+
+	a.output.AppendText("\n[#00ffff]Press Ctrl+E / Ctrl+Shift+E to navigate results[-]")
+	a.layout.SetOutputVisible(true, 10)
+	a.statusBar.SetMessage(fmt.Sprintf("Found %d matches across files", len(results)))
+}
+
+// nextSearchResult jumps to the next search result
+func (a *App) nextSearchResult() {
+	if len(a.searchResults) == 0 {
+		a.statusBar.SetMessage("No search results")
+		return
+	}
+	a.searchResultIdx++
+	if a.searchResultIdx >= len(a.searchResults) {
+		a.searchResultIdx = 0
+	}
+	a.jumpToSearchResult(a.searchResultIdx)
+}
+
+// prevSearchResult jumps to the previous search result
+func (a *App) prevSearchResult() {
+	if len(a.searchResults) == 0 {
+		a.statusBar.SetMessage("No search results")
+		return
+	}
+	a.searchResultIdx--
+	if a.searchResultIdx < 0 {
+		a.searchResultIdx = len(a.searchResults) - 1
+	}
+	a.jumpToSearchResult(a.searchResultIdx)
+}
+
+// jumpToSearchResult navigates to a specific search result
+func (a *App) jumpToSearchResult(idx int) {
+	if idx < 0 || idx >= len(a.searchResults) {
+		return
+	}
+	r := a.searchResults[idx]
+
+	// Switch to the correct tab
+	if r.TabIndex >= 0 && r.TabIndex < a.editor.TabCount() {
+		a.editor.SetActiveTab(r.TabIndex)
+	}
+
+	// Go to the line and column
+	a.editor.GoToLine(r.Line + 1) // GoToLine is 1-based
+	tab := a.editor.ActiveTab()
+	if tab != nil {
+		tab.CursorCol = r.Col
+		tab.HasSelect = true
+		tab.SelectStart = [2]int{r.Line, r.Col}
+		tab.SelectEnd = [2]int{r.Line, r.Col + r.MatchLen}
+	}
+
+	a.statusBar.SetMessage(fmt.Sprintf("Result %d of %d: %s:%d",
+		idx+1, len(a.searchResults), filepath.Base(r.FilePath), r.Line+1))
+	a.focusPanel("editor")
 }
 
 func (a *App) showGoToLine() {
