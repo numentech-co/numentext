@@ -84,6 +84,21 @@ type Editor struct {
 	// Breadcrumb: document symbols from LSP
 	breadcrumbSymbols []BreadcrumbSymbol
 	breadcrumbFile    string // file path for cached symbols
+
+	// Tab overflow / switcher
+	tabOverflow       bool   // true when tabs don't fit in the tab bar
+	tabOverflowX      int    // screen X position of the overflow indicator
+	tabOverflowY      int    // screen Y position of the overflow indicator
+	tabSwitcherOpen   bool   // true when the tab switcher dropdown is showing
+	tabSwitcherItems  []int  // indices into e.tabs, sorted by MRU
+	tabSwitcherSel    int    // selected item index in the dropdown
+	tabSwitcherX      int    // screen X of the dropdown
+	tabSwitcherY      int    // screen Y of the dropdown
+	tabSwitcherW      int    // width of the dropdown
+	tabLastUsed       []int  // tab indices in MRU order
+
+	// Callback for showing tab switcher (needs app-level dialog)
+	onShowTabSwitcher func()
 }
 
 // BreadcrumbSymbol represents a symbol for breadcrumb display.
@@ -520,6 +535,7 @@ func (e *Editor) NewTab(name, filePath string, content string) {
 	}
 	e.tabs = append(e.tabs, tab)
 	e.activeTab = len(e.tabs) - 1
+	e.trackTabUsage()
 	e.notifyTabChange()
 	e.notifyChange()
 }
@@ -529,6 +545,7 @@ func (e *Editor) OpenFile(filePath string) error {
 	for i, tab := range e.tabs {
 		if tab.FilePath == filePath {
 			e.activeTab = i
+			e.trackTabUsage()
 			e.notifyTabChange()
 			return nil
 		}
@@ -664,6 +681,7 @@ func (e *Editor) ActiveTabIndex() int {
 func (e *Editor) SetActiveTab(idx int) {
 	if idx >= 0 && idx < len(e.tabs) {
 		e.activeTab = idx
+		e.trackTabUsage()
 		e.notifyTabChange()
 		e.notifyChange()
 	}
@@ -2136,10 +2154,39 @@ func (e *Editor) handleWrappedClick(tab *Tab, clickX, clickY, width, gutterW int
 	}
 }
 
+func (e *Editor) tabLabel(tab *Tab) string {
+	if ui.Style.Modern {
+		icon := ui.Style.FileIcon(tab.Name)
+		if tab.Buffer.Modified() {
+			return " " + icon + " " + tab.Name + " " + ui.Style.ModifiedDot() + " "
+		}
+		return " " + icon + " " + tab.Name + " "
+	}
+	name := tab.Name
+	if tab.Buffer.Modified() {
+		name = "*" + name
+	}
+	return " " + name + " "
+}
+
 func (e *Editor) drawTabBar(screen tcell.Screen, x, y, width int) {
 	// Clear tab bar
 	for cx := x; cx < x+width; cx++ {
 		screen.SetContent(cx, y, ' ', nil, tcell.StyleDefault.Background(ui.ColorTabBarBg))
+	}
+
+	// Calculate total width needed for all tabs
+	overflowIndicator := " + "
+	overflowWidth := len(overflowIndicator)
+	totalNeeded := 1 // starting offset
+	for _, tab := range e.tabs {
+		totalNeeded += len([]rune(e.tabLabel(tab))) + 1 // +1 for separator
+	}
+
+	e.tabOverflow = totalNeeded > width && len(e.tabs) > 1
+	availWidth := width
+	if e.tabOverflow {
+		availWidth = width - overflowWidth
 	}
 
 	cx := x + 1
@@ -2151,35 +2198,235 @@ func (e *Editor) drawTabBar(screen tcell.Screen, x, y, width int) {
 			bg = ui.ColorTabActiveBg
 		}
 
-		// Build label: [icon] name [modified]
-		var label string
-		if ui.Style.Modern {
-			icon := ui.Style.FileIcon(tab.Name)
-			if tab.Buffer.Modified() {
-				label = " " + icon + " " + tab.Name + " " + ui.Style.ModifiedDot() + " "
-			} else {
-				label = " " + icon + " " + tab.Name + " "
-			}
-		} else {
-			name := tab.Name
-			if tab.Buffer.Modified() {
-				name = "*" + name
-			}
-			label = " " + name + " "
+		label := e.tabLabel(tab)
+		labelRunes := []rune(label)
+
+		// Check if this tab fits
+		if cx+len(labelRunes)+1 > x+availWidth {
+			// Don't draw remaining tabs - they overflow
+			break
 		}
 
-		for _, ch := range label {
-			if cx < x+width {
+		for _, ch := range labelRunes {
+			if cx < x+availWidth {
 				screen.SetContent(cx, y, ch, nil, tcell.StyleDefault.Foreground(fg).Background(bg))
 				cx++
 			}
 		}
 		// Separator
-		if cx < x+width {
+		if cx < x+availWidth {
 			screen.SetContent(cx, y, ui.Style.TabSeparator(), nil, tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorTabBarBg))
 			cx++
 		}
 	}
+
+	// Draw overflow indicator
+	if e.tabOverflow {
+		overflowX := x + width - overflowWidth
+		e.tabOverflowX = overflowX
+		e.tabOverflowY = y
+		style := tcell.StyleDefault.Foreground(ui.ColorAccel).Background(ui.ColorTabBarBg).Bold(true)
+		for i, ch := range overflowIndicator {
+			screen.SetContent(overflowX+i, y, ch, nil, style)
+		}
+	}
+
+	// Draw tab switcher dropdown if open
+	if e.tabSwitcherOpen {
+		e.drawTabSwitcher(screen, x, y, width)
+	}
+}
+
+// drawTabSwitcher draws the tab switcher dropdown below the tab bar.
+func (e *Editor) drawTabSwitcher(screen tcell.Screen, tabBarX, tabBarY, tabBarWidth int) {
+	if len(e.tabSwitcherItems) == 0 {
+		return
+	}
+
+	// Calculate dropdown dimensions
+	maxLabelW := 0
+	for _, idx := range e.tabSwitcherItems {
+		tab := e.tabs[idx]
+		name := tab.Name
+		if tab.Buffer.Modified() {
+			name = name + " *"
+		}
+		if len(name)+4 > maxLabelW {
+			maxLabelW = len(name) + 4
+		}
+	}
+	if maxLabelW > tabBarWidth-2 {
+		maxLabelW = tabBarWidth - 2
+	}
+	if maxLabelW < 20 {
+		maxLabelW = 20
+	}
+
+	dropW := maxLabelW
+
+	// Position: right-aligned to the overflow indicator, below tab bar
+	dropX := tabBarX + tabBarWidth - dropW
+	if dropX < tabBarX {
+		dropX = tabBarX
+	}
+	dropY := tabBarY + 1
+
+	e.tabSwitcherX = dropX
+	e.tabSwitcherY = dropY
+	e.tabSwitcherW = dropW
+
+	// Draw dropdown background and items
+	for i, tabIdx := range e.tabSwitcherItems {
+		iy := dropY + i
+		style := tcell.StyleDefault.Foreground(ui.ColorMenuDropText).Background(ui.ColorMenuDropBg)
+		if i == e.tabSwitcherSel {
+			style = tcell.StyleDefault.Foreground(ui.ColorMenuHlText).Background(ui.ColorMenuHighlight)
+		}
+
+		// Clear line
+		for cx := dropX; cx < dropX+dropW; cx++ {
+			screen.SetContent(cx, iy, ' ', nil, style)
+		}
+
+		// Build display text
+		tab := e.tabs[tabIdx]
+		name := tab.Name
+		if tab.Buffer.Modified() {
+			name = name + " *"
+		}
+		// Active indicator
+		prefix := "  "
+		if tabIdx == e.activeTab {
+			prefix = "> "
+		}
+		display := prefix + name
+
+		for j, ch := range display {
+			if dropX+j < dropX+dropW {
+				screen.SetContent(dropX+j, iy, ch, nil, style)
+			}
+		}
+	}
+}
+
+// OpenTabSwitcher opens the tab switcher dropdown showing all tabs sorted by MRU.
+func (e *Editor) OpenTabSwitcher() {
+	if len(e.tabs) == 0 {
+		return
+	}
+
+	// Build MRU-sorted list
+	e.tabSwitcherItems = e.mruTabOrder()
+	e.tabSwitcherSel = 0
+	e.tabSwitcherOpen = true
+}
+
+// CloseTabSwitcher closes the tab switcher dropdown.
+func (e *Editor) CloseTabSwitcher() {
+	e.tabSwitcherOpen = false
+	e.tabSwitcherItems = nil
+	e.tabSwitcherSel = 0
+}
+
+// IsTabSwitcherOpen returns whether the tab switcher dropdown is currently visible.
+func (e *Editor) IsTabSwitcherOpen() bool {
+	return e.tabSwitcherOpen
+}
+
+// TabSwitcherSelect selects the currently highlighted tab in the switcher.
+func (e *Editor) TabSwitcherSelect() {
+	if !e.tabSwitcherOpen || len(e.tabSwitcherItems) == 0 {
+		return
+	}
+	idx := e.tabSwitcherItems[e.tabSwitcherSel]
+	e.CloseTabSwitcher()
+	e.SetActiveTab(idx)
+}
+
+// TabSwitcherDown moves the selection down in the tab switcher.
+func (e *Editor) TabSwitcherDown() {
+	if !e.tabSwitcherOpen {
+		return
+	}
+	e.tabSwitcherSel++
+	if e.tabSwitcherSel >= len(e.tabSwitcherItems) {
+		e.tabSwitcherSel = 0
+	}
+}
+
+// TabSwitcherUp moves the selection up in the tab switcher.
+func (e *Editor) TabSwitcherUp() {
+	if !e.tabSwitcherOpen {
+		return
+	}
+	e.tabSwitcherSel--
+	if e.tabSwitcherSel < 0 {
+		e.tabSwitcherSel = len(e.tabSwitcherItems) - 1
+	}
+}
+
+// HasTabOverflow returns whether tabs are overflowing.
+func (e *Editor) HasTabOverflow() bool {
+	return e.tabOverflow
+}
+
+// mruTabOrder returns tab indices sorted by most recently used.
+func (e *Editor) mruTabOrder() []int {
+	if len(e.tabLastUsed) == 0 {
+		// No MRU data yet, just return indices starting with active
+		result := make([]int, len(e.tabs))
+		result[0] = e.activeTab
+		j := 1
+		for i := range e.tabs {
+			if i != e.activeTab {
+				result[j] = i
+				j++
+			}
+		}
+		return result
+	}
+
+	// Build ordered list from MRU, filtering out stale indices
+	seen := make(map[int]bool)
+	var result []int
+	for _, idx := range e.tabLastUsed {
+		if idx >= 0 && idx < len(e.tabs) && !seen[idx] {
+			result = append(result, idx)
+			seen[idx] = true
+		}
+	}
+	// Add any tabs not in MRU list
+	for i := range e.tabs {
+		if !seen[i] {
+			result = append(result, i)
+		}
+	}
+	return result
+}
+
+// trackTabUsage records the current active tab as most recently used.
+func (e *Editor) trackTabUsage() {
+	if e.activeTab < 0 || e.activeTab >= len(e.tabs) {
+		return
+	}
+	// Remove activeTab from current position if present
+	newMRU := []int{e.activeTab}
+	for _, idx := range e.tabLastUsed {
+		if idx != e.activeTab {
+			newMRU = append(newMRU, idx)
+		}
+	}
+	e.tabLastUsed = newMRU
+}
+
+// SetOnShowTabSwitcher sets the callback for showing the tab switcher.
+func (e *Editor) SetOnShowTabSwitcher(fn func()) {
+	e.onShowTabSwitcher = fn
+}
+
+// MRUTabOrder returns tab indices sorted by most recently used (public API).
+func (e *Editor) MRUTabOrder() []int {
+	return e.mruTabOrder()
 }
 
 func (e *Editor) drawHighlightedLine(screen tcell.Screen, x, y, maxWidth int, rawLine string, hl HighlightedLine, lineIdx int, tab *Tab) {
@@ -2345,6 +2592,25 @@ func (e *Editor) drawWelcome(screen tcell.Screen, x, y, width, height int) {
 // InputHandler handles key events
 func (e *Editor) InputHandler() func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
 	return e.WrapInputHandler(func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
+		// Handle tab switcher keys first
+		if e.tabSwitcherOpen {
+			switch event.Key() {
+			case tcell.KeyDown:
+				e.TabSwitcherDown()
+				return
+			case tcell.KeyUp:
+				e.TabSwitcherUp()
+				return
+			case tcell.KeyEnter:
+				e.TabSwitcherSelect()
+				return
+			case tcell.KeyEscape:
+				e.CloseTabSwitcher()
+				return
+			}
+			return // consume all other keys while switcher is open
+		}
+
 		// Handle completion popup keys first
 		if e.completion.Visible() {
 			switch event.Key() {
@@ -2430,6 +2696,25 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 		tab := e.ActiveTab()
 		if tab == nil {
 			return false, nil
+		}
+
+		// Check tab switcher dropdown click
+		if e.tabSwitcherOpen && action == tview.MouseLeftClick {
+			dropX := e.tabSwitcherX
+			dropY := e.tabSwitcherY
+			dropW := e.tabSwitcherW
+			dropH := len(e.tabSwitcherItems)
+			if mx >= dropX && mx < dropX+dropW && my >= dropY && my < dropY+dropH {
+				clickedIdx := my - dropY
+				if clickedIdx >= 0 && clickedIdx < len(e.tabSwitcherItems) {
+					tabIdx := e.tabSwitcherItems[clickedIdx]
+					e.CloseTabSwitcher()
+					e.SetActiveTab(tabIdx)
+					return true, nil
+				}
+			}
+			// Click outside dropdown closes it
+			e.CloseTabSwitcher()
 		}
 
 		// Check tab bar click
@@ -2526,15 +2811,44 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 }
 
 func (e *Editor) handleTabBarClick(relX int, tab *Tab) {
+	bx, _, bw, _ := e.GetInnerRect()
+
+	// Check if clicking the overflow indicator
+	if e.tabOverflow {
+		overflowRelX := e.tabOverflowX - bx
+		if relX >= overflowRelX && relX < overflowRelX+3 {
+			if e.tabSwitcherOpen {
+				e.CloseTabSwitcher()
+			} else {
+				e.OpenTabSwitcher()
+			}
+			return
+		}
+	}
+
+	// Check if clicking in the tab switcher dropdown
+	if e.tabSwitcherOpen {
+		// The dropdown is drawn below the tab bar; clicks there
+		// are handled in MouseHandler, not here
+		e.CloseTabSwitcher()
+	}
+
+	// Calculate available width for tabs
+	availWidth := bw
+	if e.tabOverflow {
+		availWidth = bw - 3 // space for " + "
+	}
+
 	cx := 1
 	for i, t := range e.tabs {
-		name := t.Name
-		if t.Buffer.Modified() {
-			name = "*" + name
+		label := e.tabLabel(t)
+		labelLen := len([]rune(label))
+		if cx+labelLen+1 > availWidth {
+			break
 		}
-		labelLen := len(name) + 2 // spaces
 		if relX >= cx && relX < cx+labelLen {
 			e.activeTab = i
+			e.trackTabUsage()
 			e.notifyTabChange()
 			e.notifyChange()
 			return
