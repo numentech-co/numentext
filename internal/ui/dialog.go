@@ -434,3 +434,54 @@ Press Escape to close
 
 	return wrapDialogWithShadow(text, 45, 16)
 }
+
+// GitDiffDialog creates a dialog showing unified diff output with coloring.
+func GitDiffDialog(app *tview.Application, diff string, onClose func()) tview.Primitive {
+	text := tview.NewTextView()
+	text.SetBackgroundColor(ColorBg)
+	text.SetTextColor(ColorTextWhite)
+	text.SetDynamicColors(true)
+	text.SetScrollable(true)
+	text.SetBorder(true)
+	text.SetBorderColor(ColorStatusText)
+	setModernTitle(text, "Git Diff")
+	text.SetTitleColor(ColorStatusText)
+
+	if diff == "" {
+		text.SetText("\n  No changes")
+	} else {
+		// Color the diff output: green for +, red for -, default for context
+		var sb strings.Builder
+		lines := strings.Split(diff, "\n")
+		for _, line := range lines {
+			escaped := tview.Escape(line)
+			if strings.HasPrefix(line, "+") {
+				sb.WriteString("[green]")
+				sb.WriteString(escaped)
+				sb.WriteString("[-]\n")
+			} else if strings.HasPrefix(line, "-") {
+				sb.WriteString("[red]")
+				sb.WriteString(escaped)
+				sb.WriteString("[-]\n")
+			} else if strings.HasPrefix(line, "@@") {
+				sb.WriteString("[blue]")
+				sb.WriteString(escaped)
+				sb.WriteString("[-]\n")
+			} else {
+				sb.WriteString(escaped)
+				sb.WriteString("\n")
+			}
+		}
+		text.SetText(sb.String())
+	}
+
+	text.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			onClose()
+			return nil
+		}
+		return event
+	})
+
+	return wrapDialogWithShadow(text, 80, 24)
+}

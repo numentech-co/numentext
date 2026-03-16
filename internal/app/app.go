@@ -291,6 +291,15 @@ func (a *App) setupMenus() {
 		},
 	}
 
+	// View menu
+	viewMenu := &ui.Menu{
+		Label: "View",
+		Accel: 'v',
+		Items: []*ui.MenuItem{
+			{Label: "Git Diff", Accel: 'g', Action: a.showGitDiff},
+		},
+	}
+
 	// Run menu
 	runMenu := &ui.Menu{
 		Label: "Run",
@@ -445,6 +454,7 @@ func (a *App) setupMenus() {
 	a.menuBar.AddMenu(fileMenu)
 	a.menuBar.AddMenu(editMenu)
 	a.menuBar.AddMenu(searchMenu)
+	a.menuBar.AddMenu(viewMenu)
 	a.menuBar.AddMenu(runMenu)
 	a.menuBar.AddMenu(debugMenu)
 	a.menuBar.AddMenu(toolsMenu)
@@ -1205,6 +1215,13 @@ func (a *App) saveFile() {
 	if a.annotationsVisible {
 		a.refreshAnnotations()
 	}
+	// Refresh git diff markers after save
+	filePath := tab.FilePath
+	go func() {
+		a.editor.RefreshDiffMarkersForTab(filePath)
+		a.tviewApp.QueueUpdateDraw(func() {})
+	}()
+
 
 	// Refresh file tree in case a new file was saved
 	a.fileTree.Refresh()
@@ -2001,6 +2018,21 @@ func (a *App) showAbout() {
 	a.layout.ShowDialog("about", dialog)
 }
 
+func (a *App) showGitDiff() {
+	diff, err := a.editor.GetCurrentFileDiff()
+	diffText := ""
+	if err != nil {
+		diffText = ""
+	} else {
+		diffText = diff
+	}
+	dialog := ui.GitDiffDialog(a.tviewApp, diffText, func() {
+		a.layout.HideDialog("gitdiff")
+		a.tviewApp.SetFocus(a.editor)
+	})
+	a.layout.ShowDialog("gitdiff", dialog)
+}
+
 func (a *App) showToolsConfig() {
 	text := tview.NewTextView()
 	text.SetBackgroundColor(ui.ColorDialogBg)
@@ -2203,6 +2235,9 @@ func (a *App) setupLSP() {
 		go func() {
 			a.lspManager.NotifyOpen(filePath, text)
 			a.refreshBreadcrumb(filePath)
+			// Refresh git diff markers for the newly opened file
+			a.editor.RefreshDiffMarkersForTab(filePath)
+			a.tviewApp.QueueUpdateDraw(func() {})
 		}()
 		// Track opened file language and prompt for LSP install if needed
 		a.trackFileLanguage(filePath)
