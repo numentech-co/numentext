@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -15,6 +16,15 @@ import (
 	"numentext/internal/editor/keymode"
 	"numentext/internal/ui"
 )
+
+// BlockSelection represents a rectangular/column selection
+type BlockSelection struct {
+	Active    bool
+	AnchorRow int
+	AnchorCol int
+	CursorRow int
+	CursorCol int
+}
 
 // Tab represents an open file tab
 type Tab struct {
@@ -29,6 +39,7 @@ type Tab struct {
 	SelectStart [2]int // row, col (-1 = no selection)
 	SelectEnd   [2]int
 	HasSelect   bool
+	BlockSel    BlockSelection
 }
 
 // Editor is the core editor component
@@ -84,6 +95,15 @@ type Editor struct {
 	// Breadcrumb: document symbols from LSP
 	breadcrumbSymbols []BreadcrumbSymbol
 	breadcrumbFile    string // file path for cached symbols
+
+	// Click tracking for double/triple-click
+	lastClickTime  int64 // unix nano of last click
+	lastClickRow   int
+	lastClickCol   int
+	clickCount     int   // 1=single, 2=double, 3=triple
+
+	// Block selection mouse drag state
+	blockDragging  bool
 }
 
 // BreadcrumbSymbol represents a symbol for breadcrumb display.
@@ -786,6 +806,166 @@ func (e *Editor) clearSelection(tab *Tab) {
 	tab.HasSelect = false
 	tab.SelectStart = [2]int{-1, -1}
 	tab.SelectEnd = [2]int{-1, -1}
+	e.clearBlockSelection(tab)
+}
+
+func (e *Editor) clearBlockSelection(tab *Tab) {
+	tab.BlockSel = BlockSelection{}
+}
+
+// blockSelectionRange returns the ordered rectangular region of a block selection.
+// Returns (startRow, startCol, endRow, endCol) where start <= end.
+func (e *Editor) blockSelectionRange(tab *Tab) (int, int, int, int) {
+	bs := tab.BlockSel
+	r1, c1, r2, c2 := bs.AnchorRow, bs.AnchorCol, bs.CursorRow, bs.CursorCol
+	if r1 > r2 {
+		r1, r2 = r2, r1
+	}
+	if c1 > c2 {
+		c1, c2 = c2, c1
+	}
+	return r1, c1, r2, c2
+}
+
+// isInBlockSelection returns whether a given row/col (byte offset) falls inside
+// the active block selection rectangle.
+func (e *Editor) isInBlockSelection(tab *Tab, row, col int) bool {
+	if !tab.BlockSel.Active {
+		return false
+	}
+	sr, sc, er, ec := e.blockSelectionRange(tab)
+	if row < sr || row > er {
+		return false
+	}
+	return col >= sc && col < ec
+}
+
+// blockSelectedText returns the rectangular text as lines.
+func (e *Editor) blockSelectedText(tab *Tab) string {
+	if !tab.BlockSel.Active {
+		return ""
+	}
+	sr, sc, er, ec := e.blockSelectionRange(tab)
+	var sb strings.Builder
+	for r := sr; r <= er; r++ {
+		line := tab.Buffer.Line(r)
+		// Pad short lines with spaces
+		padded := line
+		for len(padded) < ec {
+			padded += " "
+		}
+		startCol := sc
+		endCol := ec
+		if startCol > len(padded) {
+			startCol = len(padded)
+		}
+		if endCol > len(padded) {
+			endCol = len(padded)
+		}
+		sb.WriteString(padded[startCol:endCol])
+		if r < er {
+			sb.WriteString("\n")
+		}
+	}
+	return sb.String()
+}
+
+// deleteBlockSelection deletes the rectangular selection from the buffer.
+func (e *Editor) deleteBlockSelection(tab *Tab) {
+	if !tab.BlockSel.Active {
+		return
+	}
+	sr, sc, er, ec := e.blockSelectionRange(tab)
+	// Delete from bottom to top so row indices stay valid
+	for r := er; r >= sr; r-- {
+		line := tab.Buffer.Line(r)
+		startCol := sc
+		endCol := ec
+		if startCol >= len(line) {
+			continue // nothing to delete on this line
+		}
+		if endCol > len(line) {
+			endCol = len(line)
+		}
+		if startCol < endCol {
+			tab.Buffer.Delete(r, startCol, r, endCol, [2]int{tab.CursorRow, tab.CursorCol})
+		}
+	}
+	tab.CursorRow = sr
+	tab.CursorCol = sc
+	e.clearBlockSelection(tab)
+}
+
+// blockInsertChar inserts a character at the same column on each line in the block.
+func (e *Editor) blockInsertChar(tab *Tab, ch rune) {
+	sr, sc, er, _ := e.blockSelectionRange(tab)
+	// First delete the block selection content
+	e.deleteBlockSelection(tab)
+	// Then insert the character at column sc on each line
+	charStr := string(ch)
+	for r := er; r >= sr; r-- {
+		line := tab.Buffer.Line(r)
+		col := sc
+		if col > len(line) {
+			// Pad line with spaces
+			padding := strings.Repeat(" ", col-len(line))
+			tab.Buffer.Insert(r, len(line), padding, [2]int{r, len(line)})
+		}
+		tab.Buffer.Insert(r, sc, charStr, [2]int{r, sc})
+	}
+	tab.CursorRow = sr
+	tab.CursorCol = sc + len(charStr)
+}
+
+// blockBackspace deletes one column from each line in the block selection range.
+func (e *Editor) blockBackspace(tab *Tab) {
+	sr, sc, er, ec := e.blockSelectionRange(tab)
+	if ec > sc {
+		// Delete the block selection
+		e.deleteBlockSelection(tab)
+	} else if sc > 0 {
+		// No width selection, delete one char before the cursor column on each line
+		for r := er; r >= sr; r-- {
+			line := tab.Buffer.Line(r)
+			if sc-1 < len(line) {
+				tab.Buffer.Delete(r, sc-1, r, sc, [2]int{r, sc})
+			}
+		}
+		tab.CursorCol = sc - 1
+		tab.CursorRow = sr
+		e.clearBlockSelection(tab)
+	}
+}
+
+// blockPaste pastes text column-wise across lines.
+func (e *Editor) blockPaste(tab *Tab) {
+	text := e.clipboardPaste()
+	if text == "" {
+		return
+	}
+	if tab.BlockSel.Active {
+		e.deleteBlockSelection(tab)
+	}
+	pasteLines := strings.Split(text, "\n")
+	row := tab.CursorRow
+	col := tab.CursorCol
+	for i, pLine := range pasteLines {
+		r := row + i
+		if r >= tab.Buffer.LineCount() {
+			// Add new lines if needed
+			tab.Buffer.Insert(tab.Buffer.LineCount()-1, len(tab.Buffer.Line(tab.Buffer.LineCount()-1)), "\n", [2]int{r, 0})
+		}
+		if r < tab.Buffer.LineCount() {
+			line := tab.Buffer.Line(r)
+			insertCol := col
+			if insertCol > len(line) {
+				// Pad with spaces
+				padding := strings.Repeat(" ", insertCol-len(line))
+				tab.Buffer.Insert(r, len(line), padding, [2]int{r, len(line)})
+			}
+			tab.Buffer.Insert(r, insertCol, pLine, [2]int{r, insertCol})
+		}
+	}
 }
 
 func (e *Editor) startSelection(tab *Tab) {
@@ -884,6 +1064,30 @@ func (e *Editor) clipboardPaste() string {
 	result = strings.ReplaceAll(result, "\r\n", "\n")
 	result = strings.ReplaceAll(result, "\r", "\n")
 	return result
+}
+
+// wordBoundaryLeftInclusive finds the start of the word containing the given column.
+// Used for double-click word selection.
+func wordBoundaryLeftInclusive(line string, col int) int {
+	runes := []rune(line)
+	if col > len(runes) {
+		col = len(runes)
+	}
+	if col <= 0 {
+		return 0
+	}
+	i := col
+	// If cursor is on a space, go left to find a word
+	if i > 0 && i <= len(runes) && unicode.IsSpace(runes[i-1]) {
+		for i > 0 && unicode.IsSpace(runes[i-1]) {
+			i--
+		}
+	}
+	// Now go left through non-space chars to find start of word
+	for i > 0 && !unicode.IsSpace(runes[i-1]) {
+		i--
+	}
+	return i
 }
 
 // wordBoundaryLeft finds the column of the start of the word to the left
@@ -1091,6 +1295,13 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 
 	// Editing
 	case ActionInsertChar:
+		if tab.BlockSel.Active {
+			e.blockInsertChar(tab, ch)
+			e.clampCursor(tab)
+			e.ensureCursorVisible(tab)
+			e.notifyChange()
+			return
+		}
 		if tab.HasSelect {
 			e.deleteSelection(tab)
 		}
@@ -1126,6 +1337,13 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 			}
 		}
 	case ActionBackspace:
+		if tab.BlockSel.Active {
+			e.blockBackspace(tab)
+			e.clampCursor(tab)
+			e.ensureCursorVisible(tab)
+			e.notifyChange()
+			return
+		}
 		if tab.HasSelect {
 			e.deleteSelection(tab)
 		} else if tab.CursorCol > 0 {
@@ -1166,24 +1384,33 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 
 	// Clipboard
 	case ActionCopy:
-		if tab.HasSelect {
+		if tab.BlockSel.Active {
+			e.clipboardCopy(e.blockSelectedText(tab))
+		} else if tab.HasSelect {
 			e.clipboardCopy(e.selectedText(tab))
 		}
 	case ActionCut:
-		if tab.HasSelect {
+		if tab.BlockSel.Active {
+			e.clipboardCopy(e.blockSelectedText(tab))
+			e.deleteBlockSelection(tab)
+		} else if tab.HasSelect {
 			e.clipboardCopy(e.selectedText(tab))
 			e.deleteSelection(tab)
 		}
 	case ActionPaste:
-		text := e.clipboardPaste()
-		if text != "" {
-			if tab.HasSelect {
-				e.deleteSelection(tab)
+		if tab.BlockSel.Active {
+			e.blockPaste(tab)
+		} else {
+			text := e.clipboardPaste()
+			if text != "" {
+				if tab.HasSelect {
+					e.deleteSelection(tab)
+				}
+				cursor := [2]int{tab.CursorRow, tab.CursorCol}
+				newPos := tab.Buffer.Insert(tab.CursorRow, tab.CursorCol, text, cursor)
+				tab.CursorRow = newPos[0]
+				tab.CursorCol = newPos[1]
 			}
-			cursor := [2]int{tab.CursorRow, tab.CursorCol}
-			newPos := tab.Buffer.Insert(tab.CursorRow, tab.CursorCol, text, cursor)
-			tab.CursorRow = newPos[0]
-			tab.CursorCol = newPos[1]
 		}
 
 	// Undo/Redo
@@ -1359,6 +1586,74 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 
 	case ActionEnterCommandMode:
 		// Handled by the key mode itself
+
+	// Block/column selection
+	case ActionBlockSelectDown:
+		tab.HasSelect = false
+		tab.SelectStart = [2]int{-1, -1}
+		tab.SelectEnd = [2]int{-1, -1}
+		if !tab.BlockSel.Active {
+			tab.BlockSel = BlockSelection{
+				Active:    true,
+				AnchorRow: tab.CursorRow,
+				AnchorCol: tab.CursorCol,
+				CursorRow: tab.CursorRow,
+				CursorCol: tab.CursorCol,
+			}
+		}
+		if tab.BlockSel.CursorRow < tab.Buffer.LineCount()-1 {
+			tab.BlockSel.CursorRow++
+			tab.CursorRow = tab.BlockSel.CursorRow
+		}
+	case ActionBlockSelectUp:
+		tab.HasSelect = false
+		tab.SelectStart = [2]int{-1, -1}
+		tab.SelectEnd = [2]int{-1, -1}
+		if !tab.BlockSel.Active {
+			tab.BlockSel = BlockSelection{
+				Active:    true,
+				AnchorRow: tab.CursorRow,
+				AnchorCol: tab.CursorCol,
+				CursorRow: tab.CursorRow,
+				CursorCol: tab.CursorCol,
+			}
+		}
+		if tab.BlockSel.CursorRow > 0 {
+			tab.BlockSel.CursorRow--
+			tab.CursorRow = tab.BlockSel.CursorRow
+		}
+	case ActionBlockSelectRight:
+		tab.HasSelect = false
+		tab.SelectStart = [2]int{-1, -1}
+		tab.SelectEnd = [2]int{-1, -1}
+		if !tab.BlockSel.Active {
+			tab.BlockSel = BlockSelection{
+				Active:    true,
+				AnchorRow: tab.CursorRow,
+				AnchorCol: tab.CursorCol,
+				CursorRow: tab.CursorRow,
+				CursorCol: tab.CursorCol,
+			}
+		}
+		tab.BlockSel.CursorCol++
+		tab.CursorCol = tab.BlockSel.CursorCol
+	case ActionBlockSelectLeft:
+		tab.HasSelect = false
+		tab.SelectStart = [2]int{-1, -1}
+		tab.SelectEnd = [2]int{-1, -1}
+		if !tab.BlockSel.Active {
+			tab.BlockSel = BlockSelection{
+				Active:    true,
+				AnchorRow: tab.CursorRow,
+				AnchorCol: tab.CursorCol,
+				CursorRow: tab.CursorRow,
+				CursorCol: tab.CursorCol,
+			}
+		}
+		if tab.BlockSel.CursorCol > 0 {
+			tab.BlockSel.CursorCol--
+			tab.CursorCol = tab.BlockSel.CursorCol
+		}
 	}
 
 	e.clampCursor(tab)
@@ -2286,6 +2581,10 @@ func (e *Editor) hlStyleAt(hl HighlightedLine, byteOff int, tab *Tab, lineIdx in
 }
 
 func (e *Editor) isInSelection(tab *Tab, row, col int) bool {
+	// Check block selection first
+	if tab.BlockSel.Active {
+		return e.isInBlockSelection(tab, row, col)
+	}
 	if !tab.HasSelect {
 		return false
 	}
@@ -2363,8 +2662,15 @@ func (e *Editor) InputHandler() func(event *tcell.EventKey, setFocus func(p tvie
 			}
 		}
 
-		// Alt+Left/Right: horizontal viewport scroll (no cursor move)
-		if event.Modifiers()&tcell.ModAlt != 0 && !e.wordWrap {
+		// Alt+Shift+Arrow: block selection (handle before Alt scroll)
+		if event.Modifiers()&tcell.ModAlt != 0 && event.Modifiers()&tcell.ModShift != 0 {
+			switch event.Key() {
+			case tcell.KeyUp, tcell.KeyDown, tcell.KeyLeft, tcell.KeyRight:
+				// Let MapKey handle these as block select actions below
+				// (don't intercept here)
+			}
+		} else if event.Modifiers()&tcell.ModAlt != 0 && !e.wordWrap {
+			// Alt+Left/Right: horizontal viewport scroll (no cursor move)
 			tab := e.ActiveTab()
 			if tab != nil {
 				switch event.Key() {
@@ -2456,20 +2762,169 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 		switch action {
 		case tview.MouseLeftClick:
 			setFocus(e)
-			if e.wordWrap {
-				e.handleWrappedClick(tab, editorX, editorY, bw, gutterW)
-			} else {
+			mods := event.Modifiers()
+			altShift := mods&tcell.ModAlt != 0 && mods&tcell.ModShift != 0
+
+			if altShift {
+				// Alt+Shift+Click: start block selection
 				row := tab.ScrollRow + editorY
 				col := editorX + tab.ScrollCol
 				if row >= 0 && row < tab.Buffer.LineCount() {
 					tab.CursorRow = row
 					tab.CursorCol = col
 					e.clampCursor(tab)
-					e.clearSelection(tab)
+					tab.HasSelect = false
+					tab.BlockSel = BlockSelection{
+						Active:    true,
+						AnchorRow: row,
+						AnchorCol: col,
+						CursorRow: row,
+						CursorCol: col,
+					}
+					e.blockDragging = true
 					e.notifyChange()
 				}
+				return true, e
+			}
+
+			// Handle double/triple click detection
+			now := time.Now().UnixNano()
+			row := tab.ScrollRow + editorY
+			col := editorX + tab.ScrollCol
+			if row < 0 || row >= tab.Buffer.LineCount() {
+				return true, nil
+			}
+
+			threshold := int64(400 * time.Millisecond)
+			if now-e.lastClickTime < threshold && row == e.lastClickRow {
+				e.clickCount++
+			} else {
+				e.clickCount = 1
+			}
+			e.lastClickTime = now
+			e.lastClickRow = row
+			e.lastClickCol = col
+
+			if e.clickCount >= 3 {
+				// Triple-click: select entire line
+				tab.CursorRow = row
+				tab.HasSelect = true
+				tab.SelectStart = [2]int{row, 0}
+				lineLen := len(tab.Buffer.Line(row))
+				tab.SelectEnd = [2]int{row, lineLen}
+				tab.CursorCol = lineLen
+				e.clearBlockSelection(tab)
+				e.notifyChange()
+				e.clickCount = 3
+				return true, nil
+			} else if e.clickCount == 2 {
+				// Double-click: select word
+				tab.CursorRow = row
+				tab.CursorCol = col
+				e.clampCursor(tab)
+				line := tab.Buffer.Line(row)
+				wStart := wordBoundaryLeftInclusive(line, tab.CursorCol)
+				wEnd := wordBoundaryRight(line, wStart)
+				tab.HasSelect = true
+				tab.SelectStart = [2]int{row, wStart}
+				tab.SelectEnd = [2]int{row, wEnd}
+				tab.CursorCol = wEnd
+				e.clearBlockSelection(tab)
+				e.notifyChange()
+				return true, nil
+			}
+
+			// Single click
+			if e.wordWrap {
+				e.handleWrappedClick(tab, editorX, editorY, bw, gutterW)
+			} else {
+				tab.CursorRow = row
+				tab.CursorCol = col
+				e.clampCursor(tab)
+				e.clearSelection(tab)
+				e.notifyChange()
 			}
 			return true, nil
+
+		case tview.MouseLeftDoubleClick:
+			// Double-click: select word
+			setFocus(e)
+			row := tab.ScrollRow + editorY
+			if row >= 0 && row < tab.Buffer.LineCount() {
+				col := editorX + tab.ScrollCol
+				tab.CursorRow = row
+				tab.CursorCol = col
+				e.clampCursor(tab)
+				line := tab.Buffer.Line(row)
+				wStart := wordBoundaryLeftInclusive(line, tab.CursorCol)
+				wEnd := wordBoundaryRight(line, wStart)
+				tab.HasSelect = true
+				tab.SelectStart = [2]int{row, wStart}
+				tab.SelectEnd = [2]int{row, wEnd}
+				tab.CursorCol = wEnd
+				e.clearBlockSelection(tab)
+				// Track for triple-click
+				e.lastClickTime = time.Now().UnixNano()
+				e.lastClickRow = row
+				e.clickCount = 2
+				e.notifyChange()
+			}
+			return true, nil
+
+		case tview.MouseLeftDown:
+			// Check for Alt+Shift drag start
+			mods := event.Modifiers()
+			if mods&tcell.ModAlt != 0 && mods&tcell.ModShift != 0 {
+				row := tab.ScrollRow + editorY
+				col := editorX + tab.ScrollCol
+				if row >= 0 && row < tab.Buffer.LineCount() {
+					tab.CursorRow = row
+					tab.CursorCol = col
+					e.clampCursor(tab)
+					tab.HasSelect = false
+					tab.BlockSel = BlockSelection{
+						Active:    true,
+						AnchorRow: row,
+						AnchorCol: col,
+						CursorRow: row,
+						CursorCol: col,
+					}
+					e.blockDragging = true
+					e.notifyChange()
+				}
+				return true, e
+			}
+			return false, nil
+
+		case tview.MouseMove:
+			// Handle block selection drag
+			if e.blockDragging && tab.BlockSel.Active {
+				row := tab.ScrollRow + editorY
+				col := editorX + tab.ScrollCol
+				if row < 0 {
+					row = 0
+				}
+				if row >= tab.Buffer.LineCount() {
+					row = tab.Buffer.LineCount() - 1
+				}
+				if col < 0 {
+					col = 0
+				}
+				tab.BlockSel.CursorRow = row
+				tab.BlockSel.CursorCol = col
+				tab.CursorRow = row
+				tab.CursorCol = col
+				e.notifyChange()
+				return true, e
+			}
+			return false, nil
+
+		case tview.MouseLeftUp:
+			if e.blockDragging {
+				e.blockDragging = false
+				return true, nil
+			}
+			return false, nil
 		case tview.MouseScrollUp:
 			// Shift+Scroll = horizontal scroll left
 			if event.Modifiers()&tcell.ModShift != 0 {
