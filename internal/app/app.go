@@ -3306,6 +3306,7 @@ func (a *App) applyTheme(name string) {
 	a.statusBar.SetBackgroundColor(ui.ColorStatusBg)
 	a.editor.SetBackgroundColor(ui.ColorBg)
 	a.layout.MainGrid.SetBackgroundColor(ui.ColorBg)
+	a.layout.MiddleFlex.SetBackgroundColor(ui.ColorBg)
 	a.layout.Root.SetBackgroundColor(ui.ColorBg)
 	a.layout.Pages.SetBackgroundColor(ui.ColorBg)
 }

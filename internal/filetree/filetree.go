@@ -91,10 +91,13 @@ func (ft *FileTree) createNode(path, name string, isDir bool) *tview.TreeNode {
 	node := tview.NewTreeNode(icon + " " + name)
 	node.SetReference(path)
 	node.SetSelectable(true)
-	node.SetColor(ui.ColorTreeText)
 
 	if isDir {
-		node.SetColor(ui.ColorTextWhite)
+		node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBg))
+		node.SetSelectedTextStyle(tcell.StyleDefault.Foreground(ui.ColorBg).Background(ui.ColorTreeSelected))
+	} else {
+		node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTreeText).Background(ui.ColorBg))
+		node.SetSelectedTextStyle(tcell.StyleDefault.Foreground(ui.ColorBg).Background(ui.ColorTreeSelected))
 	}
 
 	return node
@@ -140,9 +143,11 @@ func (ft *FileTree) RefreshColors() {
 			if path, ok := ref.(string); ok {
 				info, err := os.Stat(path)
 				if err == nil && info.IsDir() {
-					node.SetColor(ui.ColorTextWhite)
+					node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBg))
+					node.SetSelectedTextStyle(tcell.StyleDefault.Foreground(ui.ColorBg).Background(ui.ColorTreeSelected))
 				} else {
-					node.SetColor(ui.ColorTreeText)
+					node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTreeText).Background(ui.ColorBg))
+					node.SetSelectedTextStyle(tcell.StyleDefault.Foreground(ui.ColorBg).Background(ui.ColorTreeSelected))
 				}
 			}
 		}

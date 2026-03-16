@@ -6,8 +6,9 @@ import (
 
 // Layout holds the main application layout
 type Layout struct {
-	Root     *tview.Flex
-	MainGrid *tview.Flex
+	Root       *tview.Flex
+	MainGrid   *tview.Flex
+	MiddleFlex *tview.Flex
 
 	MenuBar   *MenuBar
 	FileTree  tview.Primitive
@@ -36,6 +37,8 @@ func NewLayout(menuBar *MenuBar, fileTree tview.Primitive, editor tview.Primitiv
 	middle := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(fileTree, l.fileTreeWidth, 0, false).
 		AddItem(editor, 0, 1, true)
+	middle.SetBackgroundColor(ColorBg)
+	l.MiddleFlex = middle
 
 	// Main vertical layout: menu, middle, output, status
 	// Output starts hidden (0 height), shown when content is added
@@ -44,16 +47,16 @@ func NewLayout(menuBar *MenuBar, fileTree tview.Primitive, editor tview.Primitiv
 		AddItem(middle, 0, 3, true).
 		AddItem(output, 0, 0, false).
 		AddItem(statusBar, 1, 0, false)
-
 	mainFlex.SetBackgroundColor(ColorBg)
-
 	l.MainGrid = mainFlex
 
 	// Pages for dialog overlays
 	l.Pages = tview.NewPages()
+	l.Pages.SetBackgroundColor(ColorBg)
 	l.Pages.AddPage("main", mainFlex, true, true)
 
 	l.Root = tview.NewFlex().AddItem(l.Pages, 0, 1, true)
+	l.Root.SetBackgroundColor(ColorBg)
 
 	return l
 }
