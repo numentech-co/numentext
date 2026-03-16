@@ -23,6 +23,7 @@ type StatusBar struct {
 	focusedPanel string // name of currently focused panel
 	wordWrap     bool
 	hasErrors    bool
+	venvName     string // active Python venv name (e.g. ".venv")
 }
 
 func NewStatusBar() *StatusBar {
@@ -68,6 +69,11 @@ func (sb *StatusBar) SetWordWrap(on bool) {
 
 func (sb *StatusBar) SetHasErrors(has bool) {
 	sb.hasErrors = has
+}
+
+// SetVenvName sets the active Python virtual environment name for display.
+func (sb *StatusBar) SetVenvName(name string) {
+	sb.venvName = name
 }
 
 func (sb *StatusBar) Draw(screen tcell.Screen) {
@@ -126,10 +132,13 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 	}
 	leftEnd := x + len(left)
 
-	// Right side: panel indicator + shortcut hints
+	// Right side: venv indicator + panel indicator + shortcut hints
 	right := "F5:Run  F9:Build  F10:Menu "
 	if sb.hasErrors {
 		right = "^E:Err  " + right
+	}
+	if sb.venvName != "" {
+		right = "[" + sb.venvName + "]  " + right
 	}
 	if sb.focusedPanel != "" {
 		right = "[" + sb.focusedPanel + "]  " + right

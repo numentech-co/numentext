@@ -23,6 +23,7 @@ type LanguageToolConfig struct {
 	Linters      []ToolDef `json:"linters,omitempty"`
 	FormatOnSave bool      `json:"format_on_save"`
 	LintOnSave   bool      `json:"lint_on_save"`
+	IsDefault    bool      `json:"-"` // true if auto-detected from defaults (not persisted)
 }
 
 type Config struct {
@@ -37,6 +38,7 @@ type Config struct {
 	UIStyle       string                        `json:"ui_style"`
 	IconSet       string                        `json:"icon_set"`
 	LanguageTools map[string]LanguageToolConfig  `json:"language_tools"`
+	ActiveVenv    *VenvInfo                       `json:"-"` // runtime-only: detected Python venv
 }
 
 func DefaultConfig() *Config {

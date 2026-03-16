@@ -76,6 +76,12 @@ func New() *App {
 
 	a.workDir, _ = os.Getwd()
 
+	// Apply default tool configurations (Epic 22)
+	a.config.ApplyDefaults()
+
+	// Detect Python virtual environment (Epic 25)
+	a.config.ActiveVenv = config.DetectVenv(a.workDir)
+
 	// Initialize UI style and theme from config
 	ui.InitStyle(a.config.UIStyle, a.config.IconSet)
 	ui.ApplyTheme(a.config.Theme)
@@ -87,6 +93,11 @@ func New() *App {
 	a.setupMouse()
 	a.setupLSP()
 	a.setupDAP()
+
+	// Show venv in status bar if detected
+	if a.config.ActiveVenv != nil {
+		a.statusBar.SetVenvName(a.config.ActiveVenv.Name)
+	}
 
 	return a
 }
@@ -345,6 +356,8 @@ func (a *App) setupMenus() {
 				ui.ApplyTheme("solarized-dark")
 				_ = a.config.Save()
 			}},
+			{Label: "Language Tools", Accel: 'l', Action: a.showLanguageTools},
+			{Label: "Python Environment", Accel: 'p', Action: a.showPythonEnvDialog},
 			{Label: "Formatters/Linters", Accel: 'r', Action: a.showToolsConfig},
 		},
 	}
@@ -1037,7 +1050,8 @@ func (a *App) saveFile() {
 		cursorRow := tab.CursorRow
 		cursorCol := tab.CursorCol
 
-		result := editor.RunFormatters(tab.FilePath, toolsCfg.Formatters)
+		venvEnv := a.venvEnvForLang(langID)
+		result := editor.RunFormatters(tab.FilePath, toolsCfg.Formatters, venvEnv)
 		if result.Error != nil {
 			a.statusBar.SetMessage("Saved (format skipped: syntax errors)")
 			// File was already saved with original content (rollback happened in RunFormatters)
@@ -1063,8 +1077,9 @@ func (a *App) saveFile() {
 	if toolsCfg.LintOnSave && len(toolsCfg.Linters) > 0 {
 		filePath := tab.FilePath
 		linters := toolsCfg.Linters
+		venvEnv := a.venvEnvForLang(langID)
 		go func() {
-			result := editor.RunLinters(filePath, linters)
+			result := editor.RunLinters(filePath, linters, venvEnv)
 			a.tviewApp.QueueUpdateDraw(func() {
 				a.applyLintDiagnostics(filePath, result)
 			})
@@ -1121,7 +1136,8 @@ func (a *App) formatFile() {
 		cursorRow := tab.CursorRow
 		cursorCol := tab.CursorCol
 
-		result := editor.RunFormatters(tab.FilePath, toolsCfg.Formatters)
+		venvEnv := a.venvEnvForLang(langID)
+		result := editor.RunFormatters(tab.FilePath, toolsCfg.Formatters, venvEnv)
 		if result.Error != nil {
 			a.statusBar.SetMessage("Format error: " + result.Error.Error())
 		} else if result.Changed {
@@ -1180,9 +1196,10 @@ func (a *App) lintFile() {
 
 	filePath := tab.FilePath
 	linters := toolsCfg.Linters
+	venvEnv := a.venvEnvForLang(langID)
 	a.statusBar.SetMessage("Running linter...")
 	go func() {
-		result := editor.RunLinters(filePath, linters)
+		result := editor.RunLinters(filePath, linters, venvEnv)
 		a.tviewApp.QueueUpdateDraw(func() {
 			a.applyLintDiagnostics(filePath, result)
 		})
@@ -2299,4 +2316,169 @@ func (a *App) applyBorderStyle() {
 		tview.Borders.BottomRightFocus = '+'
 	}
 	// Modern mode uses tview defaults (Unicode box-drawing)
+}
+
+// venvEnvForLang returns the venv environment for Python tools, or nil for other languages.
+func (a *App) venvEnvForLang(langID string) []string {
+	if langID == "python" && a.config.ActiveVenv != nil {
+		return config.VenvEnv(a.config.ActiveVenv)
+	}
+	return nil
+}
+
+// showLanguageTools shows the Language Tools status dialog (Epic 22.2).
+func (a *App) showLanguageTools() {
+	text := tview.NewTextView()
+	text.SetBackgroundColor(ui.ColorDialogBg)
+	text.SetTextColor(ui.ColorStatusText)
+	text.SetDynamicColors(true)
+	text.SetBorder(true)
+	text.SetBorderColor(ui.ColorStatusText)
+	text.SetTitle(" Language Tools ")
+	text.SetTitleColor(ui.ColorStatusText)
+	text.SetScrollable(true)
+
+	statuses := a.config.GetAllToolStatuses()
+
+	var content strings.Builder
+	content.WriteString("\n")
+
+	for _, s := range statuses {
+		src := "(default)"
+		if !s.IsDefault {
+			src = "(user config)"
+		}
+		content.WriteString(fmt.Sprintf(" [white::b]%s[-::-] %s\n", s.Language, src))
+
+		fmtStatus := "OFF"
+		if s.FormatOnSave {
+			fmtStatus = "ON"
+		}
+		content.WriteString(fmt.Sprintf("   Format on save: %s\n", fmtStatus))
+		if len(s.Formatters) == 0 {
+			content.WriteString("     (none)\n")
+		}
+		for _, f := range s.Formatters {
+			if f.Installed {
+				content.WriteString(fmt.Sprintf("     %s %s\n", f.Tool.Command, strings.Join(f.Tool.Args, " ")))
+			} else {
+				content.WriteString(fmt.Sprintf("     [gray]%s (not installed)[-]\n", f.Tool.Command))
+			}
+		}
+
+		lintStatus := "OFF"
+		if s.LintOnSave {
+			lintStatus = "ON"
+		}
+		content.WriteString(fmt.Sprintf("   Lint on save: %s\n", lintStatus))
+		if len(s.Linters) == 0 {
+			content.WriteString("     (none)\n")
+		}
+		for _, l := range s.Linters {
+			if l.Installed {
+				content.WriteString(fmt.Sprintf("     %s %s\n", l.Tool.Command, strings.Join(l.Tool.Args, " ")))
+			} else {
+				content.WriteString(fmt.Sprintf("     [gray]%s (not installed)[-]\n", l.Tool.Command))
+			}
+		}
+		content.WriteString("\n")
+	}
+
+	if len(statuses) == 0 {
+		content.WriteString(" No language tools available.\n")
+	}
+
+	content.WriteString(" Press Escape to close\n")
+	text.SetText(content.String())
+
+	text.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			a.layout.HideDialog("langtools")
+			a.tviewApp.SetFocus(a.editor)
+			return nil
+		}
+		return event
+	})
+
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(text, 30, 0, true).
+			AddItem(nil, 0, 1, false),
+			55, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	a.layout.ShowDialog("langtools", modal)
+}
+
+// showPythonEnvDialog shows the Python Environment selection dialog (Epic 25.2).
+func (a *App) showPythonEnvDialog() {
+	list := tview.NewList()
+	list.SetBackgroundColor(ui.ColorDialogBg)
+	list.SetMainTextColor(ui.ColorStatusText)
+	list.SetSelectedTextColor(ui.ColorSelectedText)
+	list.SetSelectedBackgroundColor(ui.ColorSelected)
+	list.ShowSecondaryText(true)
+	list.SetSecondaryTextColor(ui.ColorTextGray)
+	list.SetBorder(true)
+	list.SetBorderColor(ui.ColorStatusText)
+	list.SetTitle(" Python Environment ")
+	list.SetTitleColor(ui.ColorStatusText)
+
+	// Detect all available venvs
+	venvs := config.DetectAllVenvs(a.workDir)
+
+	// Add "System" option
+	systemLabel := "System (global PATH)"
+	if a.config.ActiveVenv == nil {
+		systemLabel = "System (global PATH) *"
+	}
+	list.AddItem(systemLabel, "Use system-installed Python tools", 0, func() {
+		a.config.ActiveVenv = nil
+		a.statusBar.SetVenvName("")
+		a.statusBar.SetMessage("Using system Python environment")
+		a.layout.HideDialog("pyenv")
+		a.tviewApp.SetFocus(a.editor)
+	})
+
+	// Add detected venvs
+	for _, v := range venvs {
+		venv := v // capture for closure
+		label := venv.Name
+		if a.config.ActiveVenv != nil && a.config.ActiveVenv.Path == venv.Path {
+			label = venv.Name + " *"
+		}
+		list.AddItem(label, venv.Path, 0, func() {
+			a.config.ActiveVenv = venv
+			a.statusBar.SetVenvName(venv.Name)
+			a.statusBar.SetMessage("Python venv: " + venv.Name)
+			a.layout.HideDialog("pyenv")
+			a.tviewApp.SetFocus(a.editor)
+		})
+	}
+
+	if len(venvs) == 0 {
+		list.AddItem("(no virtual environments detected)", "", 0, nil)
+	}
+
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			a.layout.HideDialog("pyenv")
+			a.tviewApp.SetFocus(a.editor)
+			return nil
+		}
+		return event
+	})
+
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(list, 12, 0, true).
+			AddItem(nil, 0, 1, false),
+			55, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	a.layout.ShowDialog("pyenv", modal)
 }

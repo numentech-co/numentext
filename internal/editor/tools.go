@@ -45,7 +45,8 @@ var defaultErrorPattern = regexp.MustCompile(`^(.+?):(\d+):(?:(\d+):)?\s*(.+)$`)
 // The file is expected to already be saved to disk.
 // Each formatter is run with a 5-second timeout.
 // If any formatter fails, the original file content is restored and an error is returned.
-func RunFormatters(filePath string, formatters []config.ToolDef) FormatResult {
+// If env is non-nil, it is used as the command environment (for venv support).
+func RunFormatters(filePath string, formatters []config.ToolDef, env ...[]string) FormatResult {
 	if len(formatters) == 0 {
 		return FormatResult{}
 	}
@@ -60,6 +61,9 @@ func RunFormatters(filePath string, formatters []config.ToolDef) FormatResult {
 		args := substituteArgs(f.Args, filePath)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		cmd := exec.CommandContext(ctx, f.Command, args...)
+		if len(env) > 0 && env[0] != nil {
+			cmd.Env = env[0]
+		}
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		err := cmd.Run()
@@ -92,7 +96,8 @@ func RunFormatters(filePath string, formatters []config.ToolDef) FormatResult {
 
 // RunLinters executes the given linters on the specified file and parses their output.
 // Linters run with a 30-second timeout.
-func RunLinters(filePath string, linters []config.ToolDef) LintResult {
+// If env is non-nil, it is used as the command environment (for venv support).
+func RunLinters(filePath string, linters []config.ToolDef, env ...[]string) LintResult {
 	if len(linters) == 0 {
 		return LintResult{}
 	}
@@ -103,6 +108,9 @@ func RunLinters(filePath string, linters []config.ToolDef) LintResult {
 		args := substituteArgs(l.Args, filePath)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		cmd := exec.CommandContext(ctx, l.Command, args...)
+		if len(env) > 0 && env[0] != nil {
+			cmd.Env = env[0]
+		}
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
