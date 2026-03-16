@@ -23,6 +23,7 @@ type LanguageToolConfig struct {
 	Linters      []ToolDef `json:"linters,omitempty"`
 	FormatOnSave bool      `json:"format_on_save"`
 	LintOnSave   bool      `json:"lint_on_save"`
+	IsDefault    bool      `json:"-"` // true if auto-detected from defaults (not persisted)
 }
 
 type Config struct {
@@ -40,6 +41,7 @@ type Config struct {
 	TrackedLanguages []string                       `json:"tracked_languages,omitempty"`
 	DeclinedLSP      []string                       `json:"declined_lsp,omitempty"`
 	TestCommands     map[string]string              `json:"test_commands,omitempty"`
+	ActiveVenv       *VenvInfo                      `json:"-"` // runtime-only: detected Python venv
 }
 
 func DefaultConfig() *Config {

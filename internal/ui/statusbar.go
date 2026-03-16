@@ -25,6 +25,7 @@ type StatusBar struct {
 	hasErrors    bool
 	lineEnding   string // "LF", "CRLF", or "CR"
 	hasBOM       bool
+	venvName     string // active Python venv name (e.g. ".venv")
 }
 
 func NewStatusBar() *StatusBar {
@@ -78,6 +79,11 @@ func (sb *StatusBar) SetLineEnding(le string) {
 
 func (sb *StatusBar) SetHasBOM(has bool) {
 	sb.hasBOM = has
+}
+
+// SetVenvName sets the active Python virtual environment name for display.
+func (sb *StatusBar) SetVenvName(name string) {
+	sb.venvName = name
 }
 
 func (sb *StatusBar) Draw(screen tcell.Screen) {
@@ -142,10 +148,13 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 	}
 	leftEnd := x + len(left)
 
-	// Right side: panel indicator + shortcut hints
+	// Right side: venv indicator + panel indicator + shortcut hints
 	right := "F1:Help  ^T:Test  F5:Run  F9:Build  F10:Menu "
 	if sb.hasErrors {
 		right = "^E:Err  " + right
+	}
+	if sb.venvName != "" {
+		right = "[" + sb.venvName + "]  " + right
 	}
 	if sb.focusedPanel != "" {
 		right = "[" + sb.focusedPanel + "]  " + right
