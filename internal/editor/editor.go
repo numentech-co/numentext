@@ -57,6 +57,9 @@ type Tab struct {
 
 	BlockSel    BlockSelection
 
+	// Markdown live preview mode
+	MarkdownMode bool
+	mdBlocks     *MarkdownBlocks // cached block detection
 }
 
 // MaxBookmarks is the maximum number of bookmarks allowed per tab.
@@ -717,13 +720,14 @@ func (e *Editor) NewTab(name, filePath string, content string) {
 		defaultLE = LineEndingCRLF
 	}
 	tab := &Tab{
-		Name:        name,
-		FilePath:    filePath,
-		Buffer:      buf,
-		Highlighter: hl,
-		SelectStart: [2]int{-1, -1},
-		SelectEnd:   [2]int{-1, -1},
-		LineEnding:  defaultLE,
+		Name:         name,
+		FilePath:     filePath,
+		Buffer:       buf,
+		Highlighter:  hl,
+		SelectStart:  [2]int{-1, -1},
+		SelectEnd:    [2]int{-1, -1},
+		LineEnding:   defaultLE,
+		MarkdownMode: IsMarkdownFile(filePath),
 	}
 	e.tabs = append(e.tabs, tab)
 	e.activeTab = len(e.tabs) - 1
@@ -2604,6 +2608,9 @@ func (e *Editor) Draw(screen tcell.Screen) {
 	// Compute bracket matching for cursor position
 	e.bracketMatch = e.FindMatchingBracket(tab, highlighted)
 
+	// Detect markdown blocks (cached)
+	mdBlocks := e.ensureMarkdownBlocks(tab)
+
 	// Word wrap mode: different rendering path
 	if e.wordWrap {
 		tab.ScrollCol = 0 // no horizontal scrolling in wrap mode
@@ -2695,11 +2702,21 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		line := tab.Buffer.Line(lineIdx)
 		editorX := x + gutterW
 
-		if lineIdx < len(highlighted) {
-			// Use tview's tagged text drawing - but we'll manually draw for more control
-			e.drawHighlightedLine(screen, editorX, y+row, width-gutterW, line, highlighted[lineIdx], lineIdx, tab)
-		} else {
-			e.drawPlainLine(screen, editorX, y+row, width-gutterW, line, lineIdx, tab)
+		// Check for markdown block rendering
+		mdHandled := false
+		if mdBlocks != nil {
+			if block := IsInBlock(mdBlocks, lineIdx); block != nil {
+				mdHandled = e.drawMarkdownBlockLine(screen, editorX, y+row, width-gutterW, lineIdx, tab, block, highlighted)
+			}
+		}
+
+		if !mdHandled {
+			if lineIdx < len(highlighted) {
+				// Use tview's tagged text drawing - but we'll manually draw for more control
+				e.drawHighlightedLine(screen, editorX, y+row, width-gutterW, line, highlighted[lineIdx], lineIdx, tab)
+			} else {
+				e.drawPlainLine(screen, editorX, y+row, width-gutterW, line, lineIdx, tab)
+			}
 		}
 	}
 
