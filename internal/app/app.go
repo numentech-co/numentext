@@ -673,6 +673,24 @@ func (a *App) setupKeybindings() {
 					a.toggleAnnotations()
 					return nil
 				}
+			case 'c':
+				a.editor.HandleAction(editor.ActionCopy, 0)
+				return nil
+			case 'x':
+				a.editor.HandleAction(editor.ActionCut, 0)
+				return nil
+			case 'v':
+				a.editor.HandleAction(editor.ActionPaste, 0)
+				return nil
+			case 'z':
+				a.editor.HandleAction(editor.ActionUndo, 0)
+				return nil
+			case 'y':
+				a.editor.HandleAction(editor.ActionRedo, 0)
+				return nil
+			case 'd':
+				a.editor.HandleAction(editor.ActionDeleteLine, 0)
+				return nil
 			case 'b':
 				a.editor.HandleAction(editor.ActionMatchBracket, 0)
 				return nil
