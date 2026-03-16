@@ -149,7 +149,7 @@ func (sb *StatusBar) Draw(screen tcell.Screen) {
 	leftEnd := x + len(left)
 
 	// Right side: venv indicator + panel indicator + shortcut hints
-	right := "F1:Help  ^T:Test  F5:Run  F9:Build  F10:Menu "
+	right := "F1:Help  F3:Sel  ^T:Test  F5:Run  F9:Build  F10:Menu "
 	if sb.hasErrors {
 		right = "^E:Err  " + right
 	}

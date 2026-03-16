@@ -101,6 +101,9 @@ type Editor struct {
 	// Keyboard mode
 	keyMode keymode.KeyMapper
 
+	// Selection mode (F3 toggle): when active, arrow keys extend selection
+	selectMode bool
+
 	// Status message callback (for showing messages in status bar)
 	onStatusMessage func(msg string)
 
@@ -246,6 +249,24 @@ func (e *Editor) SetBOM(hasBOM bool) {
 	tab.HasBOM = hasBOM
 	tab.Buffer.SetModified(true)
 	e.notifyChange()
+}
+
+// ToggleSelectMode toggles F3 selection mode. When active, cursor movement extends selection.
+func (e *Editor) ToggleSelectMode() bool {
+	e.selectMode = !e.selectMode
+	if e.selectMode {
+		// Start selection at current position
+		tab := e.ActiveTab()
+		if tab != nil {
+			e.startSelection(tab)
+		}
+	}
+	return e.selectMode
+}
+
+// SelectMode returns whether F3 selection mode is active.
+func (e *Editor) SelectMode() bool {
+	return e.selectMode
 }
 
 // ConvertTabsToSpaces converts tab characters to spaces in the buffer.
@@ -1601,6 +1622,36 @@ func (e *Editor) HandleAction(action Action, ch rune) {
 	tab := e.ActiveTab()
 	if tab == nil {
 		return
+	}
+
+	// F3 selection mode: remap cursor movements to selection actions
+	if e.selectMode {
+		switch action {
+		case ActionCursorUp:
+			action = ActionSelectUp
+		case ActionCursorDown:
+			action = ActionSelectDown
+		case ActionCursorLeft:
+			action = ActionSelectLeft
+		case ActionCursorRight:
+			action = ActionSelectRight
+		case ActionCursorHome:
+			action = ActionSelectHome
+		case ActionCursorEnd:
+			action = ActionSelectEnd
+		case ActionCursorPageUp:
+			action = ActionSelectPageUp
+		case ActionCursorPageDown:
+			action = ActionSelectPageDown
+		case ActionCursorWordLeft:
+			action = ActionSelectWordLeft
+		case ActionCursorWordRight:
+			action = ActionSelectWordRight
+		case ActionInsertChar, ActionInsertNewline, ActionDeleteChar, ActionBackspace,
+			ActionCut, ActionPaste:
+			// Any editing action exits select mode
+			e.selectMode = false
+		}
 	}
 
 	switch action {

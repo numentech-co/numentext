@@ -579,6 +579,38 @@ func (a *App) setupKeybindings() {
 			}
 		}
 
+
+		// Shift+Arrow: selection. Handle at app level because some terminals
+		// report Shift+Up/Down in ways that don't reach the editor's MapKey.
+		if shift && !ctrl && a.editor.HasFocus() {
+			switch key {
+			case tcell.KeyUp:
+				a.editor.HandleAction(editor.ActionSelectUp, 0)
+				return nil
+			case tcell.KeyDown:
+				a.editor.HandleAction(editor.ActionSelectDown, 0)
+				return nil
+			case tcell.KeyLeft:
+				a.editor.HandleAction(editor.ActionSelectLeft, 0)
+				return nil
+			case tcell.KeyRight:
+				a.editor.HandleAction(editor.ActionSelectRight, 0)
+				return nil
+			case tcell.KeyHome:
+				a.editor.HandleAction(editor.ActionSelectHome, 0)
+				return nil
+			case tcell.KeyEnd:
+				a.editor.HandleAction(editor.ActionSelectEnd, 0)
+				return nil
+			case tcell.KeyPgUp:
+				a.editor.HandleAction(editor.ActionSelectPageUp, 0)
+				return nil
+			case tcell.KeyPgDn:
+				a.editor.HandleAction(editor.ActionSelectPageDown, 0)
+				return nil
+			}
+		}
+
 		// Ctrl+letter handling. Terminals send these in various ways:
 		// as KeyCtrl* constants, as KeyRune with ModCtrl, or as raw
 		// key codes with ModCtrl. Normalize by checking ctrl flag + rune.
@@ -666,6 +698,12 @@ func (a *App) setupKeybindings() {
 
 		switch key {
 		case tcell.KeyEscape:
+			// Exit selection mode if active
+			if a.editor.SelectMode() {
+				a.editor.ToggleSelectMode()
+				a.statusBar.SetMessage("")
+				return nil
+			}
 			if a.menuBar.IsOpen() {
 				a.menuBar.Close()
 				if a.hexViewMode {
@@ -709,6 +747,17 @@ func (a *App) setupKeybindings() {
 			} else {
 				// F2: next bookmark
 				a.nextBookmark()
+			}
+			return nil
+		case tcell.KeyF3:
+			// F3: toggle selection mode (Borland-style block marking)
+			if a.editor.HasFocus() {
+				on := a.editor.ToggleSelectMode()
+				if on {
+					a.statusBar.SetMessage("Selection mode ON -- use arrows to select, F3 or Esc to stop")
+				} else {
+					a.statusBar.SetMessage("")
+				}
 			}
 			return nil
 		case tcell.KeyF6:
