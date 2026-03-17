@@ -1,0 +1,104 @@
+{
+  "epics": [
+    {
+      "id": "35",
+      "title": "Three-Pane Merge Tool",
+      "description": "Built-in three-pane merge conflict resolution tool. Shows LOCAL (left), BASE (center), and REMOTE (right) versions side by side, with a fourth RESULT pane at the bottom for the merged output. Supports git mergetool integration so NumenText can be set as the default merge tool.",
+      "user_stories": [
+        {
+          "id": "35.1",
+          "title": "Merge view layout with three panes",
+          "description": "Create a new merge view widget that splits the editor area into three side-by-side read-only panes (LOCAL, BASE, REMOTE) with a fourth editable RESULT pane below. Each pane shows the file content with syntax highlighting. Panes scroll in sync. Tab key cycles focus between panes.",
+          "complexity": "High",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given a merge is initiated, when the merge view opens, then three side-by-side panes show LOCAL, BASE, and REMOTE content with labels",
+            "Given the merge view, when a fourth RESULT pane is shown below, then it contains the initial merge attempt with conflict markers",
+            "Given all four panes, when scrolling in any pane, then all panes scroll in sync",
+            "Given the merge view, when Tab is pressed, then focus cycles through LOCAL, BASE, REMOTE, RESULT panes",
+            "Given each pane, when rendered, then syntax highlighting is applied based on the file extension",
+            "Given the merge view, when the window is resized, then all panes adjust proportionally",
+            "Given the pane labels, when rendered, then LOCAL shows the branch name, REMOTE shows the incoming branch name"
+          ]
+        },
+        {
+          "id": "35.2",
+          "title": "Conflict detection and highlighting",
+          "description": "Parse the merge file for conflict markers (<<<<<<<, =======, >>>>>>>). Highlight conflict regions in all four panes with distinct colors. In the LOCAL and REMOTE panes, highlight the corresponding sections that differ. In the RESULT pane, highlight unresolved conflicts in red.",
+          "complexity": "High",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given a file with <<<<<<< markers, when opened in merge view, then conflict regions are detected and counted",
+            "Given a conflict region, when rendered in LOCAL pane, then the local version is highlighted with a green tint",
+            "Given a conflict region, when rendered in REMOTE pane, then the remote version is highlighted with a blue tint",
+            "Given a conflict region, when rendered in BASE pane, then the original version is highlighted with a neutral tint",
+            "Given the RESULT pane, when unresolved conflicts exist, then they are highlighted in red with visible conflict markers",
+            "Given the status bar, when in merge view, then it shows 'Conflict N of M' with resolved/unresolved counts",
+            "Given a file with no conflicts (clean merge), when opened in merge view, then all panes show matching content with no highlights"
+          ]
+        },
+        {
+          "id": "35.3",
+          "title": "Conflict navigation and resolution actions",
+          "description": "Navigate between conflicts with keyboard shortcuts. For each conflict, provide actions: accept LOCAL, accept REMOTE, accept BASE, accept both (LOCAL then REMOTE), or edit manually in the RESULT pane. Resolved conflicts update the RESULT pane and change their highlight from red to green.",
+          "complexity": "High",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given conflicts exist, when Ctrl+E is pressed, then cursor jumps to the next unresolved conflict in the RESULT pane",
+            "Given a conflict is focused, when 'l' or '1' is pressed in normal mode, then the LOCAL version replaces the conflict in RESULT",
+            "Given a conflict is focused, when 'r' or '3' is pressed in normal mode, then the REMOTE version replaces the conflict in RESULT",
+            "Given a conflict is focused, when 'b' or '2' is pressed in normal mode, then the BASE version replaces the conflict in RESULT",
+            "Given a conflict is focused, when 'a' is pressed, then both LOCAL and REMOTE are inserted (LOCAL first, then REMOTE)",
+            "Given the RESULT pane has focus, when the user types, then they can manually edit the merged content",
+            "Given a conflict is resolved, when the highlight updates, then the conflict region changes from red to green in RESULT",
+            "Given all conflicts are resolved, when the status bar updates, then it shows 'All conflicts resolved'"
+          ]
+        },
+        {
+          "id": "35.4",
+          "title": "Inline diff highlighting between panes",
+          "description": "Within conflict regions, show character-level or word-level diffs between LOCAL and REMOTE. Highlight the specific words or characters that differ, not just the entire block. This helps the user quickly identify what changed.",
+          "complexity": "Very High",
+          "implementation_order": 4,
+          "acceptance_criteria": [
+            "Given a conflict where LOCAL has 'foo bar' and REMOTE has 'foo baz', when rendered, then 'bar' and 'baz' are highlighted as the differing words",
+            "Given a conflict with multiple differing words, when rendered, then each differing word is individually highlighted",
+            "Given identical lines in LOCAL and REMOTE within a conflict, when rendered, then those lines have no special highlighting",
+            "Given a conflict where one side has extra lines, when rendered, then the extra lines are highlighted as additions",
+            "Given the diff highlighting, when the user resolves the conflict, then the highlighting clears in the RESULT pane"
+          ]
+        },
+        {
+          "id": "35.5",
+          "title": "Save merged result and git mergetool integration",
+          "description": "Save the RESULT pane content to the original file. Mark the merge as complete. Support git mergetool protocol: accept file paths for LOCAL, BASE, REMOTE, MERGED via command-line arguments or environment variables so NumenText can be configured as `git mergetool`.",
+          "complexity": "Medium",
+          "implementation_order": 5,
+          "acceptance_criteria": [
+            "Given all conflicts resolved, when Ctrl+S is pressed in merge view, then the RESULT content is written to the output file",
+            "Given the merge is saved, when the merge view closes, then the editor returns to normal mode with the merged file open",
+            "Given Ctrl+Q in merge view with unresolved conflicts, when pressed, then a confirmation dialog warns about unresolved conflicts",
+            "Given the command 'numentext --merge LOCAL BASE REMOTE MERGED', when executed, then merge view opens with the four files",
+            "Given git is configured with 'git config merge.tool numentext', when a merge conflict occurs, then git launches numentext in merge mode",
+            "Given the merge completes successfully, when the process exits, then it returns exit code 0 (success) to git"
+          ]
+        },
+        {
+          "id": "35.6",
+          "title": "Open merge view from editor for conflicted files",
+          "description": "Detect git merge conflict markers in open files. Add a menu item and keyboard shortcut to open the current conflicted file in three-pane merge view. Extract LOCAL, BASE, and REMOTE content from the conflict markers and from git (git show :1:file for BASE, :2: for LOCAL, :3: for REMOTE).",
+          "complexity": "Medium",
+          "implementation_order": 6,
+          "acceptance_criteria": [
+            "Given a file with <<<<<<< conflict markers is open, when View > Merge View is selected, then the three-pane merge view opens",
+            "Given the merge view, when LOCAL pane loads, then it shows content from 'git show :2:file' (ours)",
+            "Given the merge view, when BASE pane loads, then it shows content from 'git show :1:file' (base)",
+            "Given the merge view, when REMOTE pane loads, then it shows content from 'git show :3:file' (theirs)",
+            "Given the RESULT pane, when it loads, then it contains the current file content (with conflict markers for unresolved sections)",
+            "Given a file without conflict markers, when Merge View is selected, then status bar shows 'No merge conflicts in this file'"
+          ]
+        }
+      ]
+    }
+  ]
+}
