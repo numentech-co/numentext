@@ -63,6 +63,31 @@ go build -o numentext .
 ./numentext
 ```
 
+### Running on a Remote Machine
+
+NumenText is a single binary with no dependencies. Cross-compile locally and copy it over:
+
+```bash
+# For Linux AMD64
+GOOS=linux GOARCH=amd64 go build -o numentext-linux .
+
+# For Linux ARM64 (e.g., AWS Graviton)
+GOOS=linux GOARCH=arm64 go build -o numentext-linux .
+
+# Copy to remote and run
+scp numentext-linux user@your-server:~/numentext
+ssh -t user@your-server ./numentext
+```
+
+The `-t` flag ensures SSH allocates a TTY, which the terminal UI requires.
+
+**Known limitations over SSH:**
+
+- **Clipboard** -- Ctrl+C/V use the local system clipboard (pbcopy/xclip), which is not available over SSH. The internal yank/paste and editor clipboard still work. OSC 52 clipboard passthrough is not yet supported.
+- **Shift+Arrow selection** -- Some SSH clients and terminal multiplexers (tmux, screen) intercept or strip modifier keys from arrow sequences. Use **F3** (selection mode toggle) as a reliable alternative.
+- **Latency** -- Every keystroke round-trips to the server. For high-latency connections, consider [mosh](https://mosh.org/) instead of SSH for better responsiveness.
+- **Terminal type** -- Set `TERM=xterm-256color` on the remote machine for full color and Unicode support. Basic terminals (`TERM=linux`, `TERM=vt100`) automatically fall back to ASCII mode.
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |

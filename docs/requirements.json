@@ -1,0 +1,945 @@
+{
+  "epics": [
+    {
+      "id": "1",
+      "title": "Core Editor",
+      "description": "The fundamental text editing engine that supports multi-file editing with full cursor control, text manipulation, and buffer management.",
+      "user_stories": [
+        {
+          "id": "1.1",
+          "title": "Text Buffer Management",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a newly created buffer, when text is inserted at row 0 col 0, then the buffer contains that text and LineCount reflects the correct number of lines",
+            "Given a buffer with content \"hello world\", when text is inserted at row 0 col 5, then the line reads \"hello world\" split at the insertion with the new text between",
+            "Given a buffer with two lines, when a delete spans from the end of line 1 to the start of line 2, then the two lines merge into one",
+            "Given a file with CRLF line endings, when loaded into a buffer, then all line endings are normalized to LF and LineCount matches the original line count",
+            "Given a file with mixed CR and CRLF endings, when loaded into a buffer, then every line break is treated as a single LF boundary",
+            "Given a buffer with unmodified content, when Modified is queried, then it returns false",
+            "Given a buffer where text has been inserted, when Modified is queried, then it returns true",
+            "Given a modified buffer, when SetModified(false) is called after save, then Modified returns false"
+          ],
+          "technical_notes": [
+            "Current implementation uses a line-based string slice with undo stack",
+            "Consider migrating to piece table or rope for large files in the future"
+          ],
+          "complexity": "Medium",
+          "implementation_order": 1,
+          "status": "TODO"
+        },
+        {
+          "id": "1.2",
+          "title": "Undo and Redo",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the user types \"hello\" into an empty buffer, when Ctrl+Z is pressed, then the buffer is empty and the cursor returns to row 0 col 0",
+            "Given the user deletes a word, when Ctrl+Z is pressed, then the deleted word reappears at its original position and the cursor returns to before the delete",
+            "Given the user has pressed Ctrl+Z three times, when Ctrl+Y is pressed once, then the most recently undone operation is re-applied and the cursor moves to its post-edit position",
+            "Given the user undoes two operations then types a new character, when Ctrl+Y is pressed, then nothing happens because the redo stack was cleared by the new edit",
+            "Given an empty undo stack, when Ctrl+Z is pressed, then nothing happens and the buffer remains unchanged",
+            "Given an empty redo stack, when Ctrl+Y is pressed, then nothing happens and the buffer remains unchanged",
+            "Given a multi-line insertion is undone, when the undo completes, then all inserted lines are removed and the cursor returns to the original insertion point"
+          ],
+          "technical_notes": [
+            "Operations stored as EditOp structs with type, text, and cursor positions",
+            "Redo stack cleared on any new edit to maintain linear history"
+          ],
+          "complexity": "Medium",
+          "implementation_order": 2,
+          "status": "TODO"
+        },
+        {
+          "id": "1.3",
+          "title": "Cursor Movement",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the cursor is at row 0 col 5, when the Left arrow is pressed, then the cursor moves to row 0 col 4",
+            "Given the cursor is at row 1 col 0, when the Left arrow is pressed, then the cursor moves to the end of row 0",
+            "Given the cursor is at the end of row 0, when the Right arrow is pressed, then the cursor moves to row 1 col 0",
+            "Given the cursor is at row 3 col 10, when the Up arrow is pressed, then the cursor moves to row 2 col 10 or the end of row 2 if it is shorter",
+            "Given the cursor is at row 0 col 5, when Home is pressed, then the cursor moves to row 0 col 0",
+            "Given the cursor is at row 0 col 0, when End is pressed, then the cursor moves to the last column of row 0",
+            "Given a document with 100 lines, when Ctrl+Home is pressed, then the cursor moves to row 0 col 0",
+            "Given a document with 100 lines, when Ctrl+End is pressed, then the cursor moves to the last row and last column of the document",
+            "Given the cursor is at col 10 in \"hello world\", when Ctrl+Left is pressed, then the cursor jumps to col 6 (start of \"world\")",
+            "Given the cursor is at col 0 in \"hello world\", when Ctrl+Right is pressed, then the cursor jumps to col 5 (end of \"hello\" / start of space)",
+            "Given a visible page height of 20 lines and the cursor at row 10, when Page Down is pressed, then the cursor moves to row 29 or the last line if fewer lines exist"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 3,
+          "status": "TODO"
+        },
+        {
+          "id": "1.4",
+          "title": "Text Selection",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the cursor is at row 0 col 5 with no selection, when Shift+Right is pressed, then a selection is created from (0,5) to (0,6) and the character at col 5 is visually highlighted",
+            "Given an active selection from (0,5) to (0,8), when Shift+Left is pressed, then the selection shrinks to (0,5) to (0,7)",
+            "Given an active selection from (0,5) to (0,8), when the Right arrow is pressed without Shift, then the selection is cleared and the cursor is at col 8",
+            "Given a 50-line document, when Ctrl+A is pressed, then the entire document is selected from (0,0) to the last character of the last line",
+            "Given text \"world\" is selected, when the user types \"earth\", then \"world\" is deleted and \"earth\" is inserted in its place as a single undoable operation",
+            "Given text \"foo\" is selected and the user presses Shift+Down, then the selection extends from the start of \"foo\" down to the corresponding column on the next line"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 4,
+          "status": "TODO"
+        },
+        {
+          "id": "1.5",
+          "title": "Clipboard Integration",
+          "description": "",
+          "acceptance_criteria": [
+            "Given text \"hello\" is selected, when Ctrl+C is pressed, then \"hello\" is placed on the OS clipboard and the selection remains active in the editor",
+            "Given text \"hello\" is selected, when Ctrl+X is pressed, then \"hello\" is placed on the OS clipboard and the selected text is removed from the buffer",
+            "Given the OS clipboard contains \"world\" and the cursor is at row 0 col 5, when Ctrl+V is pressed, then \"world\" is inserted at that position and the cursor advances past it",
+            "Given text \"old\" is selected and the clipboard contains \"new\", when Ctrl+V is pressed, then \"old\" is replaced by \"new\" in a single undoable operation",
+            "Given the application is running on macOS, when Ctrl+C is pressed with a selection, then pbcopy receives the selected text via stdin",
+            "Given the application is running on Linux with xclip installed, when Ctrl+V is pressed, then the text from xclip -selection clipboard -o is inserted at the cursor"
+          ],
+          "technical_notes": [
+            "Uses os/exec to shell out to platform clipboard commands",
+            "No Windows support currently planned"
+          ],
+          "complexity": "Medium",
+          "implementation_order": 5,
+          "status": "TODO"
+        },
+        {
+          "id": "1.6",
+          "title": "Multi-Tab Editing",
+          "description": "",
+          "acceptance_criteria": [
+            "Given no tabs are open, when Ctrl+N is pressed, then a new tab labeled \"untitled\" appears in the tab bar and becomes the active tab",
+            "Given tabs \"main.go\" and \"util.go\" are open with \"main.go\" active, when the user clicks the \"util.go\" tab, then \"util.go\" becomes active and its buffer and cursor position are displayed",
+            "Given three tabs are open with tab 2 active, when Ctrl+3 is pressed, then tab 3 becomes active",
+            "Given \"main.go\" is already open in tab 1, when the user opens \"main.go\" again via File Open, then the editor switches to tab 1 instead of creating a duplicate tab",
+            "Given the active tab has unsaved changes, when Ctrl+W is pressed, then a confirmation dialog asks whether to save before closing",
+            "Given the active tab has no unsaved changes, when Ctrl+W is pressed, then the tab closes immediately without a prompt",
+            "Given a tab has been modified, when the tab bar is rendered, then the tab name shows an asterisk prefix like \"*main.go\"",
+            "Given tab 2 is active with cursor at row 10 col 5, when the user switches to tab 1 and back to tab 2, then the cursor is still at row 10 col 5 and the scroll position is preserved"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 6,
+          "status": "TODO"
+        },
+        {
+          "id": "1.7",
+          "title": "Basic Text Editing Operations",
+          "description": "",
+          "acceptance_criteria": [
+            "Given an empty buffer with the cursor at row 0 col 0, when the user types \"a\", then the buffer contains \"a\" and the cursor is at row 0 col 1",
+            "Given the buffer contains \"hllo\" with the cursor at row 0 col 1, when the user types \"e\", then the buffer contains \"hello\" and the cursor is at row 0 col 2",
+            "Given the buffer contains \"hello world\" with the cursor at row 0 col 5, when Enter is pressed, then line 0 becomes \"hello\", line 1 becomes \" world\", and the cursor is at row 1 col 0",
+            "Given the buffer contains \"hello\" with the cursor at row 0 col 3, when Backspace is pressed, then the buffer contains \"helo\" and the cursor is at row 0 col 2",
+            "Given two lines \"hello\" and \"world\" with the cursor at row 1 col 0, when Backspace is pressed, then the lines merge to \"helloworld\" and the cursor is at row 0 col 5",
+            "Given the buffer contains \"hello\" with the cursor at row 0 col 3, when Delete is pressed, then the buffer contains \"helo\" and the cursor stays at row 0 col 3",
+            "Given two lines \"hello\" and \"world\" with the cursor at the end of row 0, when Delete is pressed, then the lines merge to \"helloworld\"",
+            "Given the cursor is at col 0, when Tab is pressed, then four space characters are inserted and the cursor moves to col 4",
+            "Given a three-line buffer with the cursor on line 2, when Ctrl+D is pressed, then line 2 is deleted and the buffer has two lines"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 7,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "title": "Syntax Highlighting",
+      "description": "Language-aware colorization of source code using lexical analysis to visually distinguish keywords, strings, comments, and other token types.",
+      "user_stories": [
+        {
+          "id": "2.1",
+          "title": "Language Detection",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a file named \"main.go\" is opened, when the highlighter runs, then the detected language is \"Go\" and the status bar shows \"Go\"",
+            "Given a file named \"app.py\" is opened, when the highlighter runs, then the detected language is \"Python\"",
+            "Given a file named \"styles.css\" is opened, when the highlighter runs, then the detected language is \"CSS\"",
+            "Given a file named \"README.txt\" is opened, when the highlighter runs, then the language falls back to \"Text\" and no syntax coloring is applied",
+            "Given a file named \"main.c\" is saved as \"main.py\" via Save As, when the save completes, then the language re-detects as \"Python\" and highlighting updates accordingly",
+            "Given a file is open with language \"Go\" detected, when the status bar renders, then it displays \"Go\" in the language section"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 8,
+          "status": "TODO"
+        },
+        {
+          "id": "2.2",
+          "title": "Token Colorization",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a Go file containing \"func main()\", when rendered, then \"func\" appears in white bold and \"main\" appears in white bold as a function name",
+            "Given a Python file containing 'print(\"hello\")', when rendered, then \"hello\" including quotes appears in cyan",
+            "Given a C file containing \"// comment\", when rendered, then the entire comment line appears in gray",
+            "Given a Rust file containing \"let x = 42;\", when rendered, then \"42\" appears in magenta",
+            "Given a Go file containing \"type Server struct\", when rendered, then \"type\" appears in white bold and \"Server\" appears in green",
+            "Given a JavaScript file containing a multi-line block comment, when rendered, then all lines of the comment appear in gray",
+            "Given a C++ file containing '#include <stdio.h>', when rendered, then the preprocessor directive is colored distinctly from regular code"
+          ],
+          "technical_notes": [
+            "Uses chroma library for lexical analysis",
+            "Per-character CharStyle array cached per line, invalidated on edit",
+            "Consider tree-sitter migration for structural accuracy in the future"
+          ],
+          "complexity": "Medium",
+          "implementation_order": 9,
+          "status": "TODO"
+        },
+        {
+          "id": "2.3",
+          "title": "Highlighting Performance",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a file is open and no edits have occurred since the last render, when Draw is called, then the cached highlight data is reused without re-tokenizing",
+            "Given the user types a character in the buffer, when the highlight version counter is checked, then it has incremented by one since the last edit",
+            "Given the user switches from tab 1 to tab 2, when Draw is called, then the highlight cache is invalidated and tab 2's content is tokenized fresh",
+            "Given a file with 5000 lines, when the user types a character, then the keystroke is processed and the screen redraws within 100 milliseconds",
+            "Given a file containing a block comment spanning 50 lines, when rendered, then all 50 lines of the comment are colored gray because the tokenizer processes the full file"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 10,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "title": "File Management",
+      "description": "All operations related to opening, saving, browsing, and managing files and directories within the IDE.",
+      "user_stories": [
+        {
+          "id": "3.1",
+          "title": "File Open",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the user presses Ctrl+O, when the dialog appears, then it shows the current working directory contents with directories sorted before files",
+            "Given the open dialog shows \"/Users/me/project\", when the user clicks a subdirectory \"src\", then the dialog navigates into \"src\" and shows its contents",
+            "Given the open dialog shows files, when the user selects \"main.go\", then \"main.go\" opens in a new editor tab and the dialog closes",
+            "Given the open dialog path input field, when the user types \"/tmp\" and presses Enter, then the dialog navigates to /tmp and lists its contents",
+            "Given a directory containing \".git\" and \".env\" hidden entries, when the open dialog lists files, then the hidden entries are not shown",
+            "Given the open dialog is showing, when the user presses Escape, then the dialog closes without opening any file and focus returns to the editor"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 11,
+          "status": "TODO"
+        },
+        {
+          "id": "3.2",
+          "title": "File Save",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a tab editing \"/tmp/test.go\" with modifications, when Ctrl+S is pressed, then the file at \"/tmp/test.go\" is overwritten with the buffer contents and the modified flag clears",
+            "Given an untitled tab with no file path, when Ctrl+S is pressed, then a Save As dialog appears prompting for a file path",
+            "Given a tab editing a file in a read-only directory, when Ctrl+S is pressed, then an error message appears in the output panel and the buffer content is not lost",
+            "Given a successful save of \"/tmp/test.go\", when the save completes, then the status bar displays \"File saved: /tmp/test.go\"",
+            "Given a tab with no modifications, when Ctrl+S is pressed, then the file is saved anyway and the status bar confirms the save"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 12,
+          "status": "TODO"
+        },
+        {
+          "id": "3.3",
+          "title": "Save As",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a tab editing \"/tmp/old.go\", when Save As is triggered, then the dialog shows an input field pre-filled with \"/tmp/old.go\"",
+            "Given an untitled tab, when Save As is triggered, then the dialog shows an input field pre-filled with the working directory plus \"/untitled\"",
+            "Given the Save As dialog with path \"/tmp/new.py\", when the user confirms, then the file is written to \"/tmp/new.py\", the tab name updates to \"new.py\", and the language re-detects as Python",
+            "Given a successful Save As to \"/tmp/new.py\", when the config is checked, then \"/tmp/new.py\" appears in the recent files list"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 13,
+          "status": "TODO"
+        },
+        {
+          "id": "3.4",
+          "title": "File Tree Browser",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the application launches in \"/Users/me/project\", when the file tree renders, then it shows \"project\" as the root node with its immediate children listed",
+            "Given the file tree shows a collapsed directory \"src\", when the user clicks \"src\", then it expands to show its children files and subdirectories",
+            "Given the file tree shows an expanded directory \"src\", when the user clicks \"src\" again, then it collapses and hides its children",
+            "Given the file tree shows \"main.go\", when the user clicks it, then \"main.go\" opens in a new editor tab or the existing tab is activated",
+            "Given a Go file \"main.go\" in the tree, when rendered, then it shows a \"g\" type indicator before the filename",
+            "Given the user selects Tools > Refresh File Tree, when files have been added externally, then the tree reloads and shows the new files"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 14,
+          "status": "TODO"
+        },
+        {
+          "id": "3.5",
+          "title": "New File",
+          "description": "",
+          "acceptance_criteria": [
+            "Given no tabs are open, when Ctrl+N is pressed, then a new tab labeled \"untitled\" appears with an empty buffer and the cursor at row 0 col 0",
+            "Given two tabs are open, when Ctrl+N is pressed, then a third tab \"untitled\" is added and becomes the active tab with focus",
+            "Given one untitled tab exists, when Ctrl+N is pressed again, then a second untitled tab is created without a naming conflict"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 15,
+          "status": "TODO"
+        },
+        {
+          "id": "3.6",
+          "title": "Recent Files",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the user opens \"/tmp/a.go\" then \"/tmp/b.py\", when the config is checked, then the recent files list starts with \"/tmp/b.py\" followed by \"/tmp/a.go\"",
+            "Given 21 files have been opened, when the recent files list is checked, then it contains only the 20 most recent paths",
+            "Given \"/tmp/a.go\" is already in the recent files list at position 5, when \"/tmp/a.go\" is opened again, then it moves to position 1 without duplication",
+            "Given the File menu is opened, when the Recent Files submenu is displayed, then it lists recent paths with the most recent first",
+            "Given a recent file \"/tmp/old.go\" is selected from the menu, when the file still exists, then it opens in a new tab or switches to its existing tab"
+          ],
+          "technical_notes": [
+            "Stored in ~/.numentext/config.json",
+            "Duplicates removed, list capped at 20 entries"
+          ],
+          "complexity": "Medium",
+          "implementation_order": 16,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "title": "Search and Navigation",
+      "description": "Finding text, replacing text, and navigating to specific locations within the editor buffer.",
+      "user_stories": [
+        {
+          "id": "4.1",
+          "title": "Find",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the user presses Ctrl+F, when the dialog appears, then it contains a text input field labeled \"Search\" and a \"Find Next\" button",
+            "Given the buffer contains \"hello world hello\" with the cursor at col 0, when the user searches for \"hello\", then the cursor moves to col 0 and the first \"hello\" (col 0-4) is selected",
+            "Given the first \"hello\" is already selected, when Find Next is pressed again, then the cursor moves to the second \"hello\" and selects it",
+            "Given the cursor is past the last occurrence, when Find Next is pressed, then the search wraps to the beginning and finds the first occurrence",
+            "Given the buffer contains \"Hello\" and the user searches for \"hello\", when Find Next is pressed, then \"Hello\" is found because search is case-insensitive",
+            "Given the buffer does not contain \"xyz\", when the user searches for \"xyz\", then the status bar displays \"Not found: xyz\"",
+            "Given the find dialog is open, when the user presses Escape, then the dialog closes and focus returns to the editor"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 17,
+          "status": "TODO"
+        },
+        {
+          "id": "4.2",
+          "title": "Replace",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the user presses Ctrl+H, when the dialog appears, then it shows Find and Replace input fields plus Find, Replace, and Replace All buttons",
+            "Given \"hello\" is found and selected, when the user enters \"world\" in Replace and clicks Replace, then \"hello\" is replaced with \"world\" and the search advances to the next \"hello\"",
+            "Given a buffer with 5 occurrences of \"foo\", when Replace All is clicked with find \"foo\" and replace \"bar\", then all 5 are replaced and the status bar shows \"Replaced 5 occurrences\"",
+            "Given a Replace All operation, when Ctrl+Z is pressed, then all replacements are undone in a single undo step restoring the original text",
+            "Given no match is currently selected, when Replace is clicked, then the system first performs a Find before attempting replacement"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 18,
+          "status": "TODO"
+        },
+        {
+          "id": "4.3",
+          "title": "Go to Line",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the user presses Ctrl+G, when the dialog appears, then it shows a numeric input field labeled \"Line number\"",
+            "Given a 100-line document, when the user enters \"50\" and confirms, then the cursor moves to the beginning of line 50 and the view scrolls to show it",
+            "Given a 100-line document, when the user enters \"200\" and confirms, then the cursor moves to line 100 (the last line) without an error",
+            "Given the user enters \"0\" or a negative number, when confirmed, then the cursor moves to line 1 without an error",
+            "Given the Go to Line dialog is open, when the user presses Escape, then the dialog closes without moving the cursor"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 19,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Build and Run System",
+      "description": "Compiling source code and executing programs with output captured and displayed within the IDE.",
+      "user_stories": [
+        {
+          "id": "5.1",
+          "title": "Language Build Commands",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a file \"main.c\" is active, when the build system detects the language, then it selects \"gcc\" with flags \"-Wall\" as the build command",
+            "Given a file \"app.cpp\" is active, when the build system detects the language, then it selects \"g++\" with flags \"-Wall -std=c++17\"",
+            "Given a file \"main.rs\" is active, when the build system detects the language, then it selects \"rustc\" as the build command",
+            "Given a file \"main.go\" is active, when the build system detects the language, then it selects \"go build\" as the build command",
+            "Given a file \"script.py\" is active, when the build system checks for a build step, then it returns nil indicating no compilation is needed",
+            "Given a file \"app.js\" is active, when the build system selects the run command, then it chooses \"node app.js\"",
+            "Given a file \"app.ts\" is active, when the build system selects the run command, then it chooses \"npx tsx app.ts\"",
+            "Given a file \"Main.java\" is active, when the build system detects the language, then it selects \"javac\" for build and \"java -cp <dir> Main\" for run"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 20,
+          "status": "TODO"
+        },
+        {
+          "id": "5.2",
+          "title": "Run Execution",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a file \"main.go\" with valid code, when F5 is pressed, then the file is saved, \"go run main.go\" executes, and stdout appears in the output panel",
+            "Given a file \"main.c\" with valid code, when F9 is pressed, then the file is saved, gcc compiles it, \"Build successful\" appears, but the program does not execute",
+            "Given a file \"main.c\" with a syntax error, when F5 is pressed, then gcc output shows the error in the output panel and the program does not execute",
+            "Given a running process, when the output panel renders, then it shows the command in cyan, output in white, and the exit code with elapsed time on completion",
+            "Given a program that runs for 35 seconds, when the timeout is reached at 30 seconds, then the process is killed and \"timeout\" appears in the output panel",
+            "Given a build and run is in progress, when the user types in the editor, then keystrokes are processed immediately without waiting for the build to complete"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 21,
+          "status": "TODO"
+        },
+        {
+          "id": "5.3",
+          "title": "Process Control",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a process is running, when the user selects Run > Stop, then the process is terminated and the output panel shows \"Process stopped\"",
+            "Given no process is running, when Run > Stop is selected, then nothing happens and no error is displayed",
+            "Given a process is running, when F5 is pressed again, then the existing process is terminated before the new run starts"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 22,
+          "status": "TODO"
+        },
+        {
+          "id": "5.4",
+          "title": "Output Panel",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the application layout is rendered, when the output panel is visible, then it occupies the bottom 8 rows of the screen",
+            "Given a build command \"gcc main.c\" is executed, when the command starts, then \"> gcc main.c\" appears in cyan in the output panel",
+            "Given a compilation error occurs, when the error text is appended, then it appears in red in the output panel",
+            "Given a successful build, when the success message is appended, then it appears in green",
+            "Given 100 lines of output, when new output is appended, then the panel auto-scrolls to show the latest line",
+            "Given the output panel has content, when Tools > Clear Output is selected, then the output panel becomes empty"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 23,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "title": "User Interface",
+      "description": "The visual layout, menus, status indicators, and dialog system that provide the IDE's interactive surface.",
+      "user_stories": [
+        {
+          "id": "6.1",
+          "title": "Application Layout",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the application starts, when the main window renders, then the menu bar occupies row 0, the file tree occupies 20 columns on the left, the editor fills the remaining center space, the output panel occupies the bottom 8 rows, and the status bar occupies the last row",
+            "Given a terminal window 80 columns wide, when the layout renders, then the file tree is 20 columns and the editor is 60 columns wide",
+            "Given the application starts, when the background is drawn, then the editor area and file tree use dark blue (#000080) and the menu and status bars use cyan",
+            "Given the application starts, when mouse events are checked, then tview.EnableMouse has been called and click events are delivered to components"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 24,
+          "status": "TODO"
+        },
+        {
+          "id": "6.2",
+          "title": "Menu Bar",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the application is running, when the menu bar renders, then it shows labels: File, Edit, Search, Run, Tools, Options, Window, Help",
+            "Given no menu is open, when the user clicks \"File\", then a dropdown appears showing New, Open, Save, Save As, Close Tab, and Exit with their shortcuts",
+            "Given the File dropdown is open, when the user presses Right arrow, then the File dropdown closes and the Edit dropdown opens",
+            "Given the Edit dropdown is open with \"Undo\" highlighted, when the user presses Down arrow, then \"Redo\" becomes highlighted",
+            "Given the File dropdown is open with \"Save\" highlighted, when the user presses Enter, then the save action executes and the dropdown closes",
+            "Given a dropdown is open, when the user presses Escape, then the dropdown closes and focus returns to the editor",
+            "Given no menu is open, when F10 is pressed, then the File menu opens and the menu bar receives focus",
+            "Given the Run dropdown is open, when the user clicks outside the dropdown area, then the dropdown closes without executing any action"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 25,
+          "status": "TODO"
+        },
+        {
+          "id": "6.3",
+          "title": "Status Bar",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a file \"main.go\" is open with cursor at row 10 col 5, when the status bar renders, then it displays \"main.go | Ln 11, Col 6 | Go | UTF-8\"",
+            "Given the file \"main.go\" has been modified, when the status bar renders, then it shows \"main.go [modified] | Ln 11, Col 6 | Go | UTF-8\"",
+            "Given the status bar is rendered, when the right side is checked, then it shows \"F5:Run  F9:Build  F10:Menu\"",
+            "Given no tabs are open, when the status bar renders, then it displays \"NumenText\" with a hint to open or create files"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 26,
+          "status": "TODO"
+        },
+        {
+          "id": "6.4",
+          "title": "Modal Dialogs",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the user presses Ctrl+F, when the find dialog appears, then it renders centered on the screen overlaying the editor",
+            "Given a dialog is open, when a key is pressed, then only the dialog receives the key event and the editor does not process it",
+            "Given the find dialog is open, when Escape is pressed, then the dialog disappears and focus returns to the editor",
+            "Given a tab with unsaved changes, when Ctrl+W is pressed, then a confirmation dialog appears with the message \"Save changes to <filename>?\" and Yes/No buttons",
+            "Given a dialog is showing, when input fields are rendered, then they use blue background with white text matching the theme"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 27,
+          "status": "TODO"
+        },
+        {
+          "id": "6.5",
+          "title": "Welcome Screen",
+          "description": "",
+          "acceptance_criteria": [
+            "Given no tabs are open, when the editor area renders, then the NumenText ASCII art logo is displayed centered in the available space",
+            "Given the welcome screen is shown, when the user looks at the content, then it lists shortcuts: Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Q, F5, F9, Ctrl+F, Ctrl+G, F10",
+            "Given the welcome screen is shown, when the text is read, then it includes \"A Modern Terminal IDE\" and \"Inspired by Borland C++\"",
+            "Given no tabs are open, when the user presses Ctrl+N, then the welcome screen is replaced by the new empty tab"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 28,
+          "status": "TODO"
+        },
+        {
+          "id": "6.6",
+          "title": "Color Theme",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the application renders, when the editor background is checked, then it uses dark blue (#000080)",
+            "Given the application renders, when the menu bar colors are checked, then it uses white or black text on a cyan background",
+            "Given text is selected in the editor, when the selection renders, then selected characters show as black text on cyan background",
+            "Given two tabs are open with tab 1 active, when the tab bar renders, then tab 1 shows white text on blue and tab 2 shows gray text on darker blue",
+            "Given a Go file is open, when keywords like \"func\" render, then they appear in white bold; strings in cyan; comments in gray; numbers in magenta"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 29,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Configuration and Persistence",
+      "description": "Saving user preferences, application state, and settings across sessions.",
+      "user_stories": [
+        {
+          "id": "7.1",
+          "title": "Configuration File",
+          "description": "",
+          "acceptance_criteria": [
+            "Given no ~/.numentext directory exists, when the application saves config for the first time, then the directory is created and config.json is written inside it",
+            "Given ~/.numentext/config.json exists with valid JSON, when the application starts, then the config values are loaded and applied",
+            "Given ~/.numentext/config.json is corrupted or contains invalid JSON, when the application starts, then default values are used silently without displaying an error",
+            "Given the user opens a file, when the config is saved, then the recent_files array in config.json includes the new file path",
+            "Given the config file is read, when its contents are checked, then it includes keys for tab_size, theme, show_line_numbers, word_wrap, and recent_files"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 30,
+          "status": "TODO"
+        },
+        {
+          "id": "7.2",
+          "title": "Preference Options",
+          "description": "",
+          "acceptance_criteria": [
+            "Given line numbers are currently visible, when the user selects Options > Toggle Line Numbers, then the gutter disappears and the editor content fills the freed space",
+            "Given line numbers are currently hidden, when the user selects Options > Toggle Line Numbers, then the gutter reappears with line numbers displayed",
+            "Given the user toggles line numbers off, when the application is restarted, then line numbers remain off because the preference was persisted to config.json",
+            "Given a preference is changed, when the change takes effect, then the UI updates immediately without requiring a restart"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 31,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Keyboard Shortcuts",
+      "description": "Comprehensive keyboard shortcut system providing efficient access to all major IDE functions.",
+      "user_stories": [
+        {
+          "id": "8.1",
+          "title": "Global Shortcuts",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the file tree has focus, when Ctrl+N is pressed, then a new tab is created because Ctrl+N is a global shortcut",
+            "Given the output panel has focus, when Ctrl+S is pressed, then the current file saves because Ctrl+S is a global shortcut",
+            "Given the file tree has focus, when F5 is pressed, then the current file runs because F5 is a global shortcut",
+            "Given the editor has focus, when F10 is pressed, then the menu bar opens with the File menu active",
+            "Given a dialog is open, when Escape is pressed, then the dialog closes; given no dialog is open and the file tree has focus, when Escape is pressed, then focus returns to the editor",
+            "Given a dropdown menu is open, when Escape is pressed, then the menu closes and focus returns to the editor"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 32,
+          "status": "TODO"
+        },
+        {
+          "id": "8.2",
+          "title": "Editor Shortcuts",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the editor has focus and text has been typed, when Ctrl+Z is pressed, then the last edit is undone",
+            "Given the editor has focus and an undo has been performed, when Ctrl+Y is pressed, then the undo is reversed",
+            "Given text \"hello\" is selected, when Ctrl+X is pressed, then \"hello\" is cut to the clipboard and removed from the buffer",
+            "Given text \"hello\" is selected, when Ctrl+C is pressed, then \"hello\" is copied to the clipboard and remains in the buffer",
+            "Given the clipboard contains \"world\", when Ctrl+V is pressed, then \"world\" is inserted at the cursor",
+            "Given the editor has focus, when Ctrl+A is pressed, then all text in the buffer is selected",
+            "Given the cursor is on line 5, when Ctrl+D is pressed, then line 5 is deleted",
+            "Given three tabs are open with tab 1 active, when Ctrl+Tab is pressed, then tab 2 becomes active"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 33,
+          "status": "TODO"
+        },
+        {
+          "id": "8.3",
+          "title": "Tab Switching",
+          "description": "",
+          "acceptance_criteria": [
+            "Given tabs \"a.go\", \"b.py\", \"c.rs\" are open, when Ctrl+2 is pressed, then \"b.py\" becomes the active tab",
+            "Given tabs \"a.go\" and \"b.py\" are open, when Ctrl+5 is pressed, then nothing happens because tab 5 does not exist",
+            "Given three tabs with tab 3 active, when Ctrl+Tab is pressed, then tab 1 becomes active because it wraps around"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 34,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Mouse Support",
+      "description": "Full mouse interaction for cursor placement, text selection, scrolling, and UI navigation.",
+      "user_stories": [
+        {
+          "id": "9.1",
+          "title": "Editor Mouse Interaction",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a file is open with content visible, when the user left-clicks at screen position corresponding to row 5 col 10, then the cursor moves to row 5 col 10 and any selection is cleared",
+            "Given a file with 200 lines is open and scrolled to line 50, when the user scrolls the mouse wheel down, then the view scrolls down by 3 lines to show line 53 at the top",
+            "Given a file with 200 lines scrolled to line 10, when the user scrolls the mouse wheel up, then the view scrolls up by 3 lines to show line 7 at the top",
+            "Given tabs \"main.go\" and \"util.go\" are shown in the tab bar, when the user clicks on \"util.go\" in the tab bar, then \"util.go\" becomes the active tab"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 35,
+          "status": "TODO"
+        },
+        {
+          "id": "9.2",
+          "title": "File Tree Mouse Interaction",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the file tree shows \"main.go\", when the user left-clicks on \"main.go\", then the file opens in the editor in a new tab or the existing tab activates",
+            "Given the file tree shows a collapsed directory \"src\", when the user left-clicks on \"src\", then the directory expands to show its children",
+            "Given the file tree shows an expanded directory \"src\", when the user left-clicks on \"src\" again, then the directory collapses",
+            "Given the file tree has more entries than visible rows, when the user scrolls the mouse wheel in the file tree area, then the tree view scrolls"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 36,
+          "status": "TODO"
+        },
+        {
+          "id": "9.3",
+          "title": "Menu Mouse Interaction",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the menu bar shows \"File Edit Search\", when the user left-clicks on \"Edit\", then the Edit dropdown menu opens",
+            "Given the Edit dropdown is open, when the user left-clicks on \"File\" in the menu bar, then the Edit dropdown closes and the File dropdown opens",
+            "Given the File dropdown is open showing \"New, Open, Save\", when the user clicks \"Open\", then the open file action triggers and the dropdown closes",
+            "Given the File dropdown is open, when the user clicks on the editor area outside the dropdown, then the dropdown closes without executing any action"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 37,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Cross-Platform and Deployment",
+      "description": "Ensuring the IDE runs reliably across operating systems and can be easily deployed to remote machines.",
+      "user_stories": [
+        {
+          "id": "10.1",
+          "title": "Single Binary Distribution",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the source code, when \"go build -o numentext .\" is executed, then a single binary is produced with no dynamically linked dependencies other than libc",
+            "Given a macOS build machine, when \"GOOS=linux GOARCH=amd64 go build -o numentext-linux .\" is executed, then a Linux binary is produced that runs on x86_64 Linux machines",
+            "Given a compiled binary, when it is copied to a remote server via scp and executed, then it starts without errors and with no prior installation or configuration"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 38,
+          "status": "TODO"
+        },
+        {
+          "id": "10.2",
+          "title": "Platform Compatibility",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the application runs in iTerm2 on macOS, when the UI renders, then all panels, menus, and text display correctly without rendering artifacts",
+            "Given the application runs in GNOME Terminal on Linux, when the UI renders, then all panels, menus, and text display correctly",
+            "Given the application runs in Alacritty, when the UI renders, then all characters display correctly because only ASCII is used for UI elements",
+            "Given the application starts on macOS, when clipboard copy is invoked, then it uses \"pbcopy\"; given Linux, then it uses \"xclip -selection clipboard\""
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 39,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "title": "Embedded Terminal",
+      "description": "A real interactive terminal emulator embedded within the IDE for running shell commands without leaving the editor.",
+      "user_stories": [
+        {
+          "id": "11.1",
+          "title": "PTY Integration",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the embedded terminal is activated, when the terminal starts, then a pseudo-terminal is spawned running the user's default shell (from SHELL environment variable)",
+            "Given the terminal is running bash, when the user types \"ls\" and presses Enter, then the directory listing appears in the terminal panel",
+            "Given the terminal is running, when an interactive program like \"top\" is launched, then ANSI escape sequences are interpreted and the screen renders correctly",
+            "Given the terminal is running, when the user switches to another editor tab and back, then the terminal session state, scroll position, and shell history are preserved",
+            "Given the terminal panel is resized, when the resize completes, then SIGWINCH is sent to the PTY and the shell adjusts its column and row count"
+          ],
+          "technical_notes": [
+            "Use github.com/creack/pty for PTY spawning",
+            "Need a VT100/ANSI state machine to parse escape sequences into a cell grid",
+            "Render the cell grid using tcell like the editor does"
+          ],
+          "complexity": "Medium",
+          "implementation_order": 40,
+          "status": "TODO"
+        },
+        {
+          "id": "11.2",
+          "title": "Terminal Panel",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the application starts, when the output panel is rendered, then there is an option or keybinding to toggle between output-only mode and terminal mode",
+            "Given the terminal mode is active, when the user presses the toggle shortcut, then the panel switches to output-only mode showing build/run results",
+            "Given the terminal is active, when the user presses the shortcut to focus the editor, then focus moves to the editor without killing the terminal process",
+            "Given the user runs a build via F5, when terminal mode is active, then the build output optionally goes to the terminal allowing interactive program input",
+            "Given a terminal session has produced 1500 lines of output, when the user scrolls up, then at least the last 1000 lines are available in the scrollback buffer"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 41,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "title": "Language Server Protocol",
+      "description": "Integration with LSP servers to provide intelligent code assistance including completions, diagnostics, and navigation.",
+      "user_stories": [
+        {
+          "id": "12.1",
+          "title": "LSP Client Core",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a Go file is opened and gopls is installed, when the LSP client initializes, then it spawns gopls, sends the initialize request, and receives the server's capabilities",
+            "Given the LSP client has initialized, when the user opens a file, then a textDocument/didOpen notification is sent with the file URI and contents",
+            "Given the user edits a file, when a character is typed, then a textDocument/didChange notification is sent with the incremental change",
+            "Given the language server process crashes, when the client detects the broken pipe, then it displays \"Language server crashed\" in the status bar and allows restart via the Tools menu",
+            "Given a Python file is opened and pyright is installed, when the LSP client initializes, then it launches pyright and completes the handshake",
+            "Given a file type with no known language server, when the file is opened, then no LSP client is started and the editor functions normally without code intelligence"
+          ],
+          "technical_notes": [
+            "Common servers: gopls (Go), clangd (C/C++), pyright (Python), rust-analyzer (Rust), typescript-language-server (JS/TS)",
+            "Consider using an existing Go LSP client library rather than implementing the protocol from scratch"
+          ],
+          "complexity": "Medium",
+          "implementation_order": 42,
+          "status": "TODO"
+        },
+        {
+          "id": "12.2",
+          "title": "Autocomplete",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a Go file with \"fmt.\" typed, when the dot trigger character is entered, then a completion popup appears listing Printf, Println, Sprintf, and other fmt members",
+            "Given the completion popup is visible with 5 items, when the user presses Down arrow twice, then the third item is highlighted",
+            "Given the completion popup shows \"Println\" highlighted, when the user presses Enter, then \"Println\" is inserted at the cursor and the popup closes",
+            "Given the completion popup is visible, when the user presses Escape, then the popup closes without inserting anything",
+            "Given the completion popup is visible, when the user continues typing \"Pr\", then the list filters to show only completions starting with \"Pr\"",
+            "Given a Python file with \"os.path.\" typed, when the dot is entered, then completions for os.path members appear"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 43,
+          "status": "TODO"
+        },
+        {
+          "id": "12.3",
+          "title": "Diagnostics",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a Go file with an undefined variable \"x\", when the language server responds with diagnostics, then a red marker appears in the gutter on the line containing \"x\"",
+            "Given a Python file with an unused import, when the language server sends a warning diagnostic, then a yellow marker appears in the gutter",
+            "Given the cursor moves to a line with a diagnostic, when the line is focused, then the diagnostic message (e.g., \"undefined: x\") displays in the status bar",
+            "Given multiple diagnostics exist, when the output panel summary is checked, then it lists each diagnostic with filename, line number, and message",
+            "Given a diagnostic exists on line 10, when the user fixes the error and the language server sends updated diagnostics without line 10, then the red marker on line 10 disappears"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 44,
+          "status": "TODO"
+        },
+        {
+          "id": "12.4",
+          "title": "Go to Definition",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the cursor is on a function call \"DoWork()\" in a Go file, when the go-to-definition shortcut is pressed, then the cursor jumps to the line where DoWork is defined",
+            "Given the definition of \"DoWork\" is in \"worker.go\", when go-to-definition is triggered, then \"worker.go\" opens in a new tab with the cursor at the definition line",
+            "Given the definition is 100 lines below in the same file, when go-to-definition completes, then the cursor moves to that line and the view scrolls to center it",
+            "Given the cursor is on a variable with no definition available, when go-to-definition is triggered, then the status bar displays \"No definition found\""
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 45,
+          "status": "TODO"
+        },
+        {
+          "id": "12.5",
+          "title": "Hover Information",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the cursor is on a function name \"Printf\" in a Go file, when the hover shortcut is pressed, then a popup appears showing \"func fmt.Printf(format string, a ...any) (n int, err error)\"",
+            "Given the cursor is on a type name \"Server\", when the hover shortcut is pressed, then a popup shows the type definition and any documentation comments",
+            "Given the hover popup is visible, when the user presses Escape, then the popup closes",
+            "Given the hover popup is visible, when the user moves the cursor to a different line, then the popup closes",
+            "Given the hover popup is visible, when the user starts typing, then the popup closes and the typed character is inserted normally"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 46,
+          "status": "TODO"
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "title": "Debug Adapter Protocol",
+      "description": "Integration with DAP servers to provide interactive debugging with breakpoints, stepping, and variable inspection.",
+      "user_stories": [
+        {
+          "id": "13.1",
+          "title": "DAP Client Core",
+          "description": "",
+          "acceptance_criteria": [
+            "Given a Go file is active and dlv (Delve) is installed, when a debug session is started, then the DAP client launches Delve in DAP mode and completes the initialize/launch handshake",
+            "Given a Python file is active and debugpy is installed, when a debug session is started, then debugpy launches and the session initializes",
+            "Given the debug adapter crashes during a session, when the DAP client detects the failure, then it displays \"Debug adapter disconnected\" in the status bar and cleans up the session",
+            "Given a launch request is sent, when the adapter responds with success, then the program begins execution and the status bar shows \"Debugging\"",
+            "Given an attach request is configured, when the session starts, then the DAP client connects to the running process instead of launching a new one"
+          ],
+          "technical_notes": [
+            "DAP is simpler than LSP, fewer message types",
+            "Debug adapters are separate binaries, similar architecture to language servers"
+          ],
+          "complexity": "Medium",
+          "implementation_order": 47,
+          "status": "TODO"
+        },
+        {
+          "id": "13.2",
+          "title": "Breakpoints",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the cursor is on line 15, when the toggle-breakpoint shortcut is pressed, then a red marker appears in the gutter on line 15",
+            "Given line 15 has a breakpoint set, when the toggle-breakpoint shortcut is pressed again on line 15, then the red marker is removed",
+            "Given breakpoints are set on lines 10 and 20, when a debug session starts, then the DAP client sends setBreakpoints with both line numbers",
+            "Given the program is paused at line 10, when the editor renders, then line 10 has a distinct background color indicating the current execution point",
+            "Given a breakpoint is toggled during an active debug session, when the breakpoint changes, then the DAP client sends an updated setBreakpoints request immediately"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 48,
+          "status": "TODO"
+        },
+        {
+          "id": "13.3",
+          "title": "Stepping and Control",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the program is paused at a breakpoint on line 10, when Continue is pressed, then execution resumes until the next breakpoint or program exit",
+            "Given the program is paused at line 10, when Step Over is pressed, then execution advances to line 11 (or the next statement) and pauses",
+            "Given the program is paused at a function call on line 10, when Step Into is pressed, then execution enters the called function and pauses at its first line",
+            "Given the program is inside a function, when Step Out is pressed, then execution continues until the function returns and pauses at the caller",
+            "Given the program is running, when Stop is pressed, then the debug session terminates and the status bar returns to normal mode",
+            "Given the program is paused at line 20, when Step Over is pressed, then the execution line indicator moves from line 20 to the next line and the variable display refreshes"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 49,
+          "status": "TODO"
+        },
+        {
+          "id": "13.4",
+          "title": "Variable Inspection",
+          "description": "",
+          "acceptance_criteria": [
+            "Given the program is paused at a breakpoint in a function with local variable x=42, when the variables panel renders, then it shows \"x: 42\"",
+            "Given a function has parameters name=\"hello\" and count=3, when the variables panel renders, then both appear with their current values",
+            "Given a local variable \"server\" is a struct with fields Host and Port, when the user expands \"server\" in the variables panel, then it shows \"Host: localhost\" and \"Port: 8080\"",
+            "Given a variable \"items\" is a slice with 3 elements, when expanded, then it shows the index and value of each element",
+            "Given the program steps from line 10 to line 11 where x changes from 42 to 43, when the variable panel refreshes, then x shows the new value 43"
+          ],
+          "technical_notes": [],
+          "complexity": "Medium",
+          "implementation_order": 50,
+          "status": "TODO"
+        }
+      ]
+    }
+  ]
+}
