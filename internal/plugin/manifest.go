@@ -15,6 +15,7 @@ type Manifest struct {
 	MinVersion  string            `json:"min_version,omitempty"`
 	FileTypes   []string          `json:"file_types,omitempty"`
 	Commands    []ManifestCommand `json:"commands,omitempty"`
+	Menus       []ManifestMenu    `json:"menus,omitempty"`
 	Panels      []ManifestPanel   `json:"panels,omitempty"`
 }
 
@@ -22,6 +23,13 @@ type Manifest struct {
 type ManifestCommand struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+}
+
+// ManifestMenu describes a menu item declared in plugin.json.
+type ManifestMenu struct {
+	Menu    string `json:"menu"`
+	Label   string `json:"label"`
+	Command string `json:"command"`
 }
 
 // ManifestPanel describes a panel declared in plugin.json.

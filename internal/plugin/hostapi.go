@@ -21,6 +21,8 @@ type PluginHost interface {
 	HidePanel(name string)
 	SetPanelContent(name, text string)
 	AppendPanelContent(name, text string)
+	Exec(command string, args []string, workDir string) (string, error)
+	SetGutterMarkers(filePath string, markers map[int]string)
 }
 
 // registerHostAPI registers the "numen" global table on the Lua state
@@ -201,6 +203,44 @@ func registerHostAPI(lr *LuaRuntime, host PluginHost, pluginName string, registr
 		event := L.CheckString(1)
 		fn := L.CheckFunction(2)
 		events.Subscribe(event, pluginName, fn, lr)
+		return 0
+	}))
+
+	// numen.exec(command, args_table, work_dir) -> output, err
+	numen.RawSetString("exec", L.NewFunction(func(L *lua.LState) int {
+		command := L.CheckString(1)
+		argsTable := L.OptTable(2, L.NewTable())
+		workDir := L.OptString(3, "")
+
+		var args []string
+		argsTable.ForEach(func(_, v lua.LValue) {
+			args = append(args, v.String())
+		})
+
+		output, err := host.Exec(command, args, workDir)
+		if err != nil {
+			L.Push(lua.LNil)
+			L.Push(lua.LString(err.Error()))
+			return 2
+		}
+		L.Push(lua.LString(output))
+		return 1
+	}))
+
+	// numen.set_gutter_markers(file_path, markers_table)
+	// markers_table is {[line_number] = "added"|"modified"|"deleted", ...}
+	numen.RawSetString("set_gutter_markers", L.NewFunction(func(L *lua.LState) int {
+		filePath := L.CheckString(1)
+		markersTable := L.CheckTable(2)
+
+		markers := make(map[int]string)
+		markersTable.ForEach(func(k, v lua.LValue) {
+			if kn, ok := k.(lua.LNumber); ok {
+				markers[int(kn)] = v.String()
+			}
+		})
+
+		host.SetGutterMarkers(filePath, markers)
 		return 0
 	}))
 

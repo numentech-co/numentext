@@ -877,55 +877,6 @@ func (e *Editor) SaveAs(filePath string) error {
 	return e.SaveCurrentFile()
 }
 
-// RefreshDiffMarkers updates git diff markers for the active tab.
-// This should be called after save and after file open.
-func (e *Editor) RefreshDiffMarkers() {
-	tab := e.ActiveTab()
-	if tab == nil || tab.FilePath == "" {
-		return
-	}
-	markers, err := DiffMarkers(tab.FilePath)
-	if err != nil && err.Error() == "untracked" {
-		tab.DiffMarkers = nil
-		tab.DiffAllAdded = true
-		return
-	}
-	tab.DiffMarkers = markers
-	tab.DiffAllAdded = false
-}
-
-// RefreshDiffMarkersForTab updates git diff markers for a specific tab by file path.
-func (e *Editor) RefreshDiffMarkersForTab(filePath string) {
-	for _, tab := range e.tabs {
-		if tab.FilePath == filePath {
-			markers, err := DiffMarkers(filePath)
-			if err != nil && err.Error() == "untracked" {
-				tab.DiffMarkers = nil
-				tab.DiffAllAdded = true
-				return
-			}
-			tab.DiffMarkers = markers
-			tab.DiffAllAdded = false
-			return
-		}
-	}
-}
-
-// GetCurrentFileDiff returns the raw git diff output for the current file.
-func (e *Editor) GetCurrentFileDiff() (string, error) {
-	tab := e.ActiveTab()
-	if tab == nil || tab.FilePath == "" {
-		return "", fmt.Errorf("no file open")
-	}
-	diff, err := RunGitDiff(tab.FilePath)
-	if err != nil {
-		if err.Error() == "untracked" {
-			return "", fmt.Errorf("file is not tracked by git")
-		}
-		return "", err
-	}
-	return diff, nil
-}
 
 // ReloadCurrentFile re-reads the active tab's file from disk into the buffer.
 func (e *Editor) ReloadCurrentFile() error {
