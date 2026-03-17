@@ -979,6 +979,22 @@ func (e *Editor) SetCursorPos(row, col int) {
 	tab.CursorCol = col
 }
 
+// InsertAtCursor inserts text at the current cursor position.
+func (e *Editor) InsertAtCursor(text string) {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return
+	}
+	if tab.HasSelect {
+		e.deleteSelection(tab)
+	}
+	cursor := [2]int{tab.CursorRow, tab.CursorCol}
+	newPos := tab.Buffer.Insert(tab.CursorRow, tab.CursorCol, text, cursor)
+	tab.CursorRow = newPos[0]
+	tab.CursorCol = newPos[1]
+	e.notifyChange()
+}
+
 func (e *Editor) CloseTab(idx int) {
 	if idx < 0 || idx >= len(e.tabs) {
 		return
