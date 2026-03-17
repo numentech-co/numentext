@@ -41,6 +41,8 @@ type Config struct {
 	TrackedLanguages []string                       `json:"tracked_languages,omitempty"`
 	DeclinedLSP      []string                       `json:"declined_lsp,omitempty"`
 	TestCommands     map[string]string              `json:"test_commands,omitempty"`
+	DisabledPlugins  []string                       `json:"disabled_plugins,omitempty"`
+	PluginRegistryURL string                        `json:"plugin_registry_url,omitempty"`
 	ActiveVenv       *VenvInfo                      `json:"-"` // runtime-only: detected Python venv
 }
 

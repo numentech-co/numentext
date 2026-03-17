@@ -22,6 +22,7 @@ import (
 	"numentext/internal/mergeview"
 	"numentext/internal/lsp"
 	"numentext/internal/output"
+	"numentext/internal/plugin"
 	"numentext/internal/runner"
 	"numentext/internal/terminal"
 	"numentext/internal/ui"
@@ -87,6 +88,9 @@ type App struct {
 	// Merge view
 	mergeView     *mergeview.MergeView // active merge view (nil when not in merge mode)
 	mergeViewMode bool                 // true when merge view is displayed instead of editor
+
+	// Plugin system
+	pluginManager *plugin.Manager
 }
 
 func New() *App {
@@ -123,6 +127,7 @@ func New() *App {
 	a.setupMouse()
 	a.setupLSP()
 	a.setupDAP()
+	a.setupPlugins()
 
 	// Show venv in status bar if detected
 	if a.config.ActiveVenv != nil {
@@ -435,6 +440,8 @@ func (a *App) setupMenus() {
 			{Label: "Language Tools", Accel: 'l', Action: a.showLanguageTools},
 			{Label: "Python Environment", Accel: 'p', Action: a.showPythonEnvDialog},
 			{Label: "Formatters/Linters", Accel: 'r', Action: a.showToolsConfig},
+			{Label: "---"},
+			{Label: "Plugins...", Action: a.showPluginsDialog},
 		},
 	}
 
@@ -1187,6 +1194,18 @@ func (a *App) openFileSmartDetect(path string) {
 		return
 	}
 
+	// Check if a plugin claims this file type
+	ext := filepath.Ext(path)
+	if a.pluginManager != nil && a.pluginManager.HasFileHandler(ext) {
+		content := string(data)
+		if err := a.pluginManager.InvokeFileHandler(ext, path, content); err != nil {
+			a.output.AppendError("Plugin handler error: " + err.Error())
+		}
+		// Notify plugins of file open
+		a.pluginManager.HandleFileOpen(path)
+		return
+	}
+
 	if hexview.IsBinaryData(data) {
 		a.showHexView(path, data)
 	} else {
@@ -1197,6 +1216,11 @@ func (a *App) openFileSmartDetect(path string) {
 		if err := a.editor.OpenFile(path); err != nil {
 			a.output.AppendError("Error opening file: " + err.Error())
 		}
+	}
+
+	// Notify plugins of file open
+	if a.pluginManager != nil {
+		a.pluginManager.HandleFileOpen(path)
 	}
 }
 
@@ -1688,6 +1712,11 @@ func (a *App) saveFile() {
 
 	// Refresh file tree in case a new file was saved
 	a.fileTree.Refresh()
+
+	// Notify plugins of file save
+	if a.pluginManager != nil && tab.FilePath != "" {
+		a.pluginManager.HandleFileSave(tab.FilePath)
+	}
 }
 
 func (a *App) saveFileAs() {
@@ -3536,6 +3565,11 @@ func (a *App) applyTheme(name string) {
 	a.layout.MiddleFlex.SetBackgroundColor(ui.ColorBg)
 	a.layout.Root.SetBackgroundColor(ui.ColorBg)
 	a.layout.Pages.SetBackgroundColor(ui.ColorBg)
+
+	// Notify plugins of theme change
+	if a.pluginManager != nil {
+		a.pluginManager.HandleThemeChange(name)
+	}
 }
 
 func (a *App) applyBorderStyle() {
@@ -3825,4 +3859,162 @@ func (a *App) showHTMLEntityPicker() {
 	)
 	a.layout.ShowDialog("htmlentity", dialog)
 
+}
+
+// --- Plugin system integration ---
+
+// setupPlugins initializes the plugin manager and loads all enabled plugins.
+func (a *App) setupPlugins() {
+	a.pluginManager = plugin.NewManager(a)
+	a.pluginManager.SetDisabledPlugins(a.config.DisabledPlugins)
+	a.pluginManager.SetOnLog(func(msg string) {
+		a.output.AppendText(msg)
+	})
+	a.pluginManager.Events().SetOnError(func(pluginName, event string, err error) {
+		a.output.AppendError(fmt.Sprintf("Plugin %s (%s): %v", pluginName, event, err))
+	})
+
+	if err := a.pluginManager.LoadAll(); err != nil {
+		a.output.AppendError("Plugin loading: " + err.Error())
+	}
+}
+
+// PluginHost interface implementation for App
+
+func (a *App) PluginOpenFile(path string) error {
+	return a.editor.OpenFile(path)
+}
+
+func (a *App) PluginActiveFilePath() string {
+	tab := a.editor.ActiveTab()
+	if tab == nil {
+		return ""
+	}
+	return tab.FilePath
+}
+
+func (a *App) PluginActiveFileContent() string {
+	tab := a.editor.ActiveTab()
+	if tab == nil {
+		return ""
+	}
+	return tab.Buffer.Text()
+}
+
+func (a *App) PluginCursorPosition() (int, int) {
+	tab := a.editor.ActiveTab()
+	if tab == nil {
+		return 0, 0
+	}
+	return tab.CursorRow, tab.CursorCol
+}
+
+func (a *App) PluginSetCursor(row, col int) {
+	a.editor.SetCursorPos(row, col)
+}
+
+func (a *App) PluginInsertText(text string) {
+	a.editor.InsertAtCursor(text)
+}
+
+func (a *App) PluginSetStatusMessage(msg string) {
+	a.statusBar.SetMessage(msg)
+}
+
+func (a *App) PluginAppendOutput(text string) {
+	a.output.AppendText(text)
+}
+
+func (a *App) PluginAddMenuItem(menuName, label string, action func()) {
+	// Find the menu by name and add the item
+	for _, m := range a.menuBar.Menus() {
+		if strings.EqualFold(m.Label, menuName) {
+			m.Items = append(m.Items, &ui.MenuItem{Label: label, Action: action})
+			return
+		}
+	}
+}
+
+func (a *App) PluginAddCommand(id, title string, action func()) {
+	// Commands are accessible via the command palette, which reads from menus.
+	// Add to Tools menu as a plugin command.
+	for _, m := range a.menuBar.Menus() {
+		if m.Label == "Tools" {
+			m.Items = append(m.Items, &ui.MenuItem{Label: title, Action: action})
+			return
+		}
+	}
+}
+
+func (a *App) PluginShowPanel(name string) {
+	a.layout.SetOutputVisible(true, a.config.OutputHeight)
+}
+
+func (a *App) PluginHidePanel(name string) {
+	a.layout.SetOutputVisible(false, 0)
+}
+
+func (a *App) PluginSetPanelContent(name, text string) {
+	a.output.Clear()
+	a.output.AppendText(text)
+	a.layout.SetOutputVisible(true, a.config.OutputHeight)
+}
+
+func (a *App) PluginAppendPanelContent(name, text string) {
+	a.output.AppendText(text)
+	a.layout.SetOutputVisible(true, a.config.OutputHeight)
+}
+
+// Implement plugin.PluginHost interface by delegating to Plugin* methods.
+// These are called from hostapi.go via the PluginHost interface.
+
+func (a *App) OpenFile(path string) error          { return a.PluginOpenFile(path) }
+func (a *App) ActiveFilePath() string              { return a.PluginActiveFilePath() }
+func (a *App) ActiveFileContent() string           { return a.PluginActiveFileContent() }
+func (a *App) CursorPosition() (int, int)          { return a.PluginCursorPosition() }
+func (a *App) SetCursor(row, col int)              { a.PluginSetCursor(row, col) }
+func (a *App) InsertText(text string)              { a.PluginInsertText(text) }
+func (a *App) SetStatusMessage(msg string)         { a.PluginSetStatusMessage(msg) }
+func (a *App) AppendOutput(text string)            { a.PluginAppendOutput(text) }
+func (a *App) AddMenuItem(menuName, label string, action func()) {
+	a.PluginAddMenuItem(menuName, label, action)
+}
+func (a *App) AddCommand(id, title string, action func()) {
+	a.PluginAddCommand(id, title, action)
+}
+func (a *App) ShowPanel(name string)                  { a.PluginShowPanel(name) }
+func (a *App) HidePanel(name string)                  { a.PluginHidePanel(name) }
+func (a *App) SetPanelContent(name, text string)      { a.PluginSetPanelContent(name, text) }
+func (a *App) AppendPanelContent(name, text string)   { a.PluginAppendPanelContent(name, text) }
+
+// showPluginsDialog displays a list of installed plugins with enable/disable toggle.
+func (a *App) showPluginsDialog() {
+	plugins := a.pluginManager.Plugins()
+	if len(plugins) == 0 {
+		a.statusBar.SetMessage("No plugins installed. Use --plugin-install to add plugins.")
+		return
+	}
+
+	// Build a simple list of plugin names and statuses
+	var lines []string
+	var names []string
+	for name, entry := range plugins {
+		status := "enabled"
+		if !entry.Enabled {
+			status = "disabled"
+		}
+		lines = append(lines, fmt.Sprintf("  %s v%s - %s [%s]",
+			entry.Manifest.Name, entry.Manifest.Version,
+			entry.Manifest.Description, status))
+		names = append(names, name)
+	}
+
+	// Use a simple info dialog
+	text := "Installed Plugins:\n\n" + strings.Join(lines, "\n") +
+		"\n\nUse --plugin-install/--plugin-remove from CLI to manage."
+	dialog := ui.MessageDialog(a.tviewApp, "Plugins", text, func() {
+		a.layout.HideDialog("plugins")
+		a.tviewApp.SetFocus(a.editor)
+	})
+	a.layout.ShowDialog("plugins", dialog)
 }

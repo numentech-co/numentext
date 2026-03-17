@@ -435,6 +435,60 @@ Press Escape to close
 	return wrapDialogWithShadow(text, 45, 16)
 }
 
+// MessageDialog creates a simple informational dialog with a title and body text.
+func MessageDialog(app *tview.Application, title, body string, onClose func()) tview.Primitive {
+	text := tview.NewTextView()
+	text.SetBackgroundColor(ColorDialogBg)
+	text.SetTextColor(ColorStatusText)
+	text.SetDynamicColors(true)
+	text.SetScrollable(true)
+	text.SetBorder(true)
+	text.SetBorderColor(ColorStatusText)
+	setModernTitle(text, title)
+	text.SetTitleColor(ColorStatusText)
+	text.SetText(tview.Escape(body))
+
+	text.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape || event.Key() == tcell.KeyEnter {
+			onClose()
+			return nil
+		}
+		return event
+	})
+
+	// Calculate dialog size based on content
+	lines := 1
+	maxWidth := 0
+	lineWidth := 0
+	for _, ch := range body {
+		if ch == '\n' {
+			lines++
+			if lineWidth > maxWidth {
+				maxWidth = lineWidth
+			}
+			lineWidth = 0
+		} else {
+			lineWidth++
+		}
+	}
+	if lineWidth > maxWidth {
+		maxWidth = lineWidth
+	}
+	width := maxWidth + 4
+	if width < 40 {
+		width = 40
+	}
+	if width > 70 {
+		width = 70
+	}
+	height := lines + 4
+	if height > 20 {
+		height = 20
+	}
+
+	return wrapDialogWithShadow(text, width, height)
+}
+
 // GitDiffDialog creates a dialog showing unified diff output with coloring.
 func GitDiffDialog(app *tview.Application, diff string, onClose func()) tview.Primitive {
 	text := tview.NewTextView()
