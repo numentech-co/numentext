@@ -629,7 +629,11 @@ func (a *App) setupKeybindings() {
 		}
 		// Some terminals send Ctrl+letter as KeyCtrl* (key 1-26) with rune 0.
 		// Map those back to the corresponding letter.
-		if ctrlRune == 0 && key >= 1 && key <= 26 {
+		// Exclude Backspace (key 8 = Ctrl+H) and Tab (key 9 = Ctrl+I) and
+		// Enter (key 13 = Ctrl+M) which are distinct keys, not Ctrl combos.
+		if ctrlRune == 0 && key >= 1 && key <= 26 &&
+			key != tcell.KeyBackspace && key != tcell.KeyBackspace2 &&
+			key != tcell.KeyTab && key != tcell.KeyEnter && key != tcell.KeyLF {
 			ctrlRune = rune('a' + key - 1)
 			ctrl = true
 		}
