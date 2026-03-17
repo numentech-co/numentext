@@ -26,5 +26,5 @@ Thumbs.db
 
 # Dev artifacts
 tickets.db
-docs/
+docs/modern-ui-requirements.json
 .claude/
