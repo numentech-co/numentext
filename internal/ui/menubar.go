@@ -235,7 +235,7 @@ func (mb *MenuBar) drawDropdown(screen tcell.Screen, startX, startY int) {
 		shortcutStyle := tcell.StyleDefault.Foreground(ColorMenuShortcut).Background(ColorMenuDropBg)
 		if i == mb.activeItem {
 			style = tcell.StyleDefault.Foreground(ColorMenuHlText).Background(ColorMenuHighlight)
-			shortcutStyle = tcell.StyleDefault.Foreground(ColorTextGray).Background(ColorMenuHighlight)
+			shortcutStyle = tcell.StyleDefault.Foreground(ColorMenuHlText).Background(ColorMenuHighlight).Dim(true)
 		}
 		if item.Disabled {
 			style = tcell.StyleDefault.Foreground(ColorMenuShortcut).Background(ColorMenuDropBg)
@@ -253,11 +253,12 @@ func (mb *MenuBar) drawDropdown(screen tcell.Screen, startX, startY int) {
 			if dropX+2+j < dropX+maxWidth {
 				charStyle := style
 				if !accelDone && !item.Disabled && unicode.ToLower(ch) == accelRune && unicode.IsLetter(ch) {
-					bg := ColorMenuDropBg
 					if i == mb.activeItem {
-						bg = ColorMenuHighlight
+						// Selected: use bright text on highlight bg so accel is visible
+						charStyle = tcell.StyleDefault.Foreground(ColorMenuHlText).Background(ColorMenuHighlight).Bold(true).Underline(true)
+					} else {
+						charStyle = tcell.StyleDefault.Foreground(ColorAccel).Background(ColorMenuDropBg).Bold(true)
 					}
-					charStyle = tcell.StyleDefault.Foreground(ColorAccel).Background(bg).Bold(true)
 					accelDone = true
 				}
 				screen.SetContent(dropX+2+j, iy, ch, nil, charStyle)
