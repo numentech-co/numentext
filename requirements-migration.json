@@ -1,0 +1,269 @@
+{
+  "epics": [
+    {
+      "id": "38",
+      "title": "Migrate Jupyter Notebook to Plugin",
+      "description": "Extract the Jupyter notebook viewer/editor from internal/notebook/ into the numentext-jupyter plugin repo. Convert from a compiled-in Go package to a Lua plugin using the plugin system's file type handler and panel APIs. The core NumenText binary should have no Jupyter code after migration.",
+      "user_stories": [
+        {
+          "id": "38.1",
+          "title": "Scaffold numentext-jupyter plugin repo",
+          "description": "Initialize the numentext-jupyter GitHub repo with plugin.json manifest, init.lua entry point, LICENSE (Apache 2.0), README, and basic directory structure. The manifest should claim .ipynb file type and register relevant commands and shortcuts.",
+          "complexity": "Low",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the numentext-jupyter repo, when cloned to ~/.numentext/plugins/jupyter/, then NumenText discovers it on startup",
+            "Given plugin.json, when parsed, then it declares file_types [\".ipynb\"], name \"jupyter\", and version",
+            "Given the repo, when checked, then it contains LICENSE (Apache 2.0) matching the core project",
+            "Given the README, when read, then it explains installation via --plugin-install and usage"
+          ]
+        },
+        {
+          "id": "38.2",
+          "title": "Port .ipynb parser to Lua",
+          "description": "Rewrite the notebook JSON parser (internal/notebook/parser.go) as a Lua module. Parse .ipynb v4 format into cells with type, source, outputs, and metadata. Use Lua's built-in JSON decoding or a lightweight JSON library.",
+          "complexity": "Medium",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given a valid .ipynb v4 file, when parsed by the Lua module, then all cells are extracted with correct type (code/markdown/raw)",
+            "Given a code cell with outputs, when parsed, then stdout text and error tracebacks are extracted",
+            "Given a cell with base64 image output, when parsed, then the image data is available for saving",
+            "Given notebook metadata with kernelspec, when parsed, then the kernel language is extracted",
+            "Given an invalid or corrupt .ipynb file, when parsed, then a clear error is returned without crashing"
+          ]
+        },
+        {
+          "id": "38.3",
+          "title": "Port cell rendering and navigation to Lua plugin",
+          "description": "Rewrite the NotebookView cell rendering and navigation using the plugin panel API. Register a file type handler for .ipynb that renders cells in a plugin panel. Support navigation mode (Up/Down between cells) and edit mode (Enter to edit cell content).",
+          "complexity": "High",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given a .ipynb file opened, when the plugin handles it, then cells render in the panel with syntax highlighting for code and styled text for markdown",
+            "Given navigation mode, when Up/Down is pressed, then the selected cell changes",
+            "Given a selected cell, when Enter is pressed, then the cell enters edit mode",
+            "Given edit mode, when Escape is pressed, then the cell returns to navigation mode",
+            "Given navigation mode, when 'a' or 'b' is pressed, then a new cell is inserted above or below",
+            "Given navigation mode, when 'dd' is pressed, then the current cell is deleted"
+          ]
+        },
+        {
+          "id": "38.4",
+          "title": "Port cell execution to Lua plugin",
+          "description": "Rewrite cell execution (Python subprocess or Jupyter REST API) as Lua code using the plugin host API for process execution. Support Shift+Enter to execute and advance, Ctrl+Shift+Enter to run all cells.",
+          "complexity": "High",
+          "implementation_order": 4,
+          "acceptance_criteria": [
+            "Given a code cell, when Shift+Enter is pressed, then the cell code executes via Python subprocess and output appears below the cell",
+            "Given execution output with stdout, when displayed, then text output appears below the cell",
+            "Given execution output with an error, when displayed, then the traceback appears in red below the cell",
+            "Given Ctrl+Shift+Enter, when pressed, then all code cells execute in order from top to bottom",
+            "Given no Python installed, when execution is attempted, then a clear error message is shown"
+          ]
+        },
+        {
+          "id": "38.5",
+          "title": "Remove Jupyter code from core and verify plugin works",
+          "description": "Delete internal/notebook/ from the core NumenText repo. Remove all notebook references from app.go. Verify that installing the plugin via --plugin-install restores full .ipynb functionality. Update README to document the plugin.",
+          "complexity": "Medium",
+          "implementation_order": 5,
+          "acceptance_criteria": [
+            "Given the core NumenText binary, when built without the plugin, then no notebook code is included and binary size decreases",
+            "Given the core binary, when opening a .ipynb file without the plugin, then it opens as plain text (JSON)",
+            "Given 'numentext --plugin-install github.com/numentech-co/numentext-jupyter', when executed, then the plugin installs",
+            "Given the plugin installed, when opening a .ipynb file, then the notebook viewer renders cells correctly",
+            "Given the core README, when read, then Jupyter is listed as an optional plugin with install instructions"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "39",
+      "title": "Migrate Git Tools to Plugin",
+      "description": "Extract git diff display, gutter markers, diff view dialog, and the three-pane merge tool from the core into the numentext-git plugin repo. The plugin uses the event listener and panel APIs to provide git integration as an installable extension.",
+      "user_stories": [
+        {
+          "id": "39.1",
+          "title": "Scaffold numentext-git plugin repo",
+          "description": "Initialize the numentext-git GitHub repo with plugin.json, init.lua, LICENSE, README, and directory structure. Register commands for git diff, merge view, and git blame. Register event listeners for file open/save to refresh diff markers.",
+          "complexity": "Low",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the numentext-git repo, when cloned to ~/.numentext/plugins/git/, then NumenText discovers it on startup",
+            "Given plugin.json, when parsed, then it declares commands for git-diff, git-merge, git-blame",
+            "Given the repo, when checked, then it contains LICENSE (Apache 2.0) and README with install instructions",
+            "Given the plugin loaded, when the View menu opens, then Git Diff and Merge View items appear"
+          ]
+        },
+        {
+          "id": "39.2",
+          "title": "Port git diff gutter markers to Lua plugin",
+          "description": "Rewrite the git diff marker computation (internal/editor/gitdiff.go) as a Lua module. Use numen.on('file_open') and numen.on('file_save') events to trigger diff computation. Use a host API extension to set gutter markers on specific lines.",
+          "complexity": "High",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given a file in a git repo with changes, when opened with the plugin active, then green/red/blue gutter markers appear for added/deleted/modified lines",
+            "Given a file saved, when the save event fires, then diff markers refresh automatically",
+            "Given a file not in a git repo, when opened, then no markers appear and no errors occur",
+            "Given git is not installed, when a file opens, then no markers appear and no errors occur"
+          ]
+        },
+        {
+          "id": "39.3",
+          "title": "Port diff view dialog to Lua plugin",
+          "description": "Rewrite the unified diff dialog (GitDiffDialog in dialog.go) as a plugin command. The plugin registers a 'Git Diff' command that shows the diff output in a plugin panel with color-coded lines.",
+          "complexity": "Medium",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given the Git Diff command, when invoked from View menu or command palette, then the diff output appears in a panel",
+            "Given diff output, when rendered, then added lines show in green, removed in red, context in default",
+            "Given an unmodified file, when diff is requested, then the panel shows 'No changes'",
+            "Given the diff panel, when Escape is pressed, then it closes"
+          ]
+        },
+        {
+          "id": "39.4",
+          "title": "Port three-pane merge tool to plugin",
+          "description": "Rewrite the merge view (internal/mergeview/) as a plugin component. This is the most complex migration since it requires a custom multi-pane UI. The plugin registers a file type handler for conflicted files and a --merge CLI integration.",
+          "complexity": "Very High",
+          "implementation_order": 4,
+          "acceptance_criteria": [
+            "Given a file with conflict markers, when 'Merge View' is selected, then the three-pane view opens with LOCAL/BASE/REMOTE + RESULT",
+            "Given the merge view, when conflict resolution shortcuts are used (1/2/3/a), then conflicts are resolved correctly",
+            "Given all conflicts resolved, when Ctrl+S is pressed, then the result is saved",
+            "Given 'numentext --merge LOCAL BASE REMOTE MERGED' with the plugin installed, then the merge view opens"
+          ]
+        },
+        {
+          "id": "39.5",
+          "title": "Remove git code from core and verify plugin works",
+          "description": "Delete internal/editor/gitdiff.go, internal/mergeview/, and git-related code from app.go and dialog.go. Verify plugin restores functionality. Keep the --merge CLI flag in main.go but delegate to the plugin if installed.",
+          "complexity": "Medium",
+          "implementation_order": 5,
+          "acceptance_criteria": [
+            "Given the core binary without the plugin, when built, then no git diff or merge code is included",
+            "Given the core binary, when View > Git Diff is selected without the plugin, then nothing happens or a message says 'Install numentext-git plugin'",
+            "Given the plugin installed, when git diff features are used, then they work identically to the built-in version",
+            "Given the core README, when read, then git integration is listed as an optional plugin"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "40",
+      "title": "Migrate HTML Tools to Plugin",
+      "description": "Extract HTML encode/decode and entity picker from the core into the numentext-html plugin repo. Simple migration since the feature is self-contained with no event hooks or file type claims.",
+      "user_stories": [
+        {
+          "id": "40.1",
+          "title": "Scaffold numentext-html plugin repo",
+          "description": "Initialize the numentext-html GitHub repo with plugin.json, init.lua, LICENSE, README. Register three commands: html-encode, html-decode, insert-html-entity. Register Edit menu items for each.",
+          "complexity": "Low",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the numentext-html repo, when cloned to ~/.numentext/plugins/html/, then NumenText discovers it on startup",
+            "Given plugin.json, when parsed, then it declares three commands for encode, decode, and entity picker",
+            "Given the plugin loaded, when Edit menu opens, then HTML Encode, HTML Decode, and Insert HTML Entity items appear"
+          ]
+        },
+        {
+          "id": "40.2",
+          "title": "Port HTML encode/decode to Lua plugin",
+          "description": "Rewrite HTML entity encoding/decoding (internal/editor/html.go) as Lua functions. Use numen.active_content() to get text, numen.insert_text() to replace. Support selection-only operation via cursor/selection APIs.",
+          "complexity": "Low",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given selected text '<div>', when HTML Encode command runs, then it becomes '&lt;div&gt;'",
+            "Given selected text '&amp;', when HTML Decode command runs, then it becomes '&'",
+            "Given no selection, when encode runs, then the entire file content is encoded",
+            "Given the operation completes, when Ctrl+Z is pressed, then the change is undone"
+          ]
+        },
+        {
+          "id": "40.3",
+          "title": "Port HTML entity picker to Lua plugin",
+          "description": "Rewrite the entity picker dialog (html_entity_dialog.go) as a Lua-driven dialog. Use the plugin panel API to show a searchable list of entities. Selecting an entity inserts it at the cursor.",
+          "complexity": "Medium",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given the Insert HTML Entity command, when invoked, then a panel shows a list of common entities",
+            "Given the entity list, when the user types 'space', then only &nbsp; and similar are shown",
+            "Given an entity is selected, when confirmed, then the entity code is inserted at the cursor",
+            "Given the picker, when Escape is pressed, then it closes without inserting"
+          ]
+        },
+        {
+          "id": "40.4",
+          "title": "Remove HTML code from core and verify plugin works",
+          "description": "Delete internal/editor/html.go, internal/ui/html_entity_dialog.go, and HTML menu items from app.go. Verify plugin restores functionality.",
+          "complexity": "Low",
+          "implementation_order": 4,
+          "acceptance_criteria": [
+            "Given the core binary without the plugin, when built, then no HTML tool code is included",
+            "Given the core binary, when Edit menu opens without the plugin, then HTML items are absent",
+            "Given the plugin installed, when HTML tools are used, then they work identically",
+            "Given the core README, when read, then HTML tools are listed as an optional plugin"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "41",
+      "title": "Migrate TODO Scanner to Plugin",
+      "description": "Extract the TODO/FIXME/BUG annotation scanner and annotations panel from the core into the numentext-todo plugin repo. The plugin uses event listeners to scan on file save and a panel to display results.",
+      "user_stories": [
+        {
+          "id": "41.1",
+          "title": "Scaffold numentext-todo plugin repo",
+          "description": "Initialize the numentext-todo GitHub repo with plugin.json, init.lua, LICENSE, README. Register the annotations panel, Ctrl+Shift+A shortcut, and file_save event listener.",
+          "complexity": "Low",
+          "implementation_order": 1,
+          "acceptance_criteria": [
+            "Given the numentext-todo repo, when cloned to ~/.numentext/plugins/todo/, then NumenText discovers it on startup",
+            "Given plugin.json, when parsed, then it declares a panel, a shortcut (Ctrl+Shift+A), and a Tools menu item",
+            "Given the plugin loaded, when Tools menu opens, then 'Annotations' item appears"
+          ]
+        },
+        {
+          "id": "41.2",
+          "title": "Port annotation scanner to Lua plugin",
+          "description": "Rewrite the comment scanning logic (internal/editor/annotations.go) as a Lua module. Detect TODO, FIXME, BUG, HACK, WONTFIX, XXX, NOTE in comments. Use numen.on('file_save') to trigger re-scan. Use numen.active_content() to get file text.",
+          "complexity": "Medium",
+          "implementation_order": 2,
+          "acceptance_criteria": [
+            "Given a file with '// TODO: fix this', when scanned, then the annotation is detected with tag=TODO and text='fix this'",
+            "Given a file with '# FIXME: broken' (Python), when scanned, then the annotation is detected",
+            "Given a file saved, when the save event fires, then annotations for that file are re-scanned",
+            "Given TODO inside a string literal, when scanned, then it is ignored (best effort)"
+          ]
+        },
+        {
+          "id": "41.3",
+          "title": "Port annotations panel to Lua plugin",
+          "description": "Rewrite the annotations panel (internal/editor/annotations_panel.go) using the plugin panel API. Show all annotations grouped by file with line numbers. Clicking jumps to location.",
+          "complexity": "Medium",
+          "implementation_order": 3,
+          "acceptance_criteria": [
+            "Given annotations in multiple files, when the panel opens, then all annotations are listed sorted by file then line",
+            "Given an annotation entry, when displayed, then it shows filename:line tag and description text",
+            "Given an annotation entry, when selected, then the editor opens that file and jumps to the line",
+            "Given Ctrl+Shift+A, when pressed, then the annotations panel toggles open/closed"
+          ]
+        },
+        {
+          "id": "41.4",
+          "title": "Remove TODO scanner from core and verify plugin works",
+          "description": "Delete internal/editor/annotations.go, annotations_panel.go, and related code from app.go. Verify plugin restores functionality.",
+          "complexity": "Low",
+          "implementation_order": 4,
+          "acceptance_criteria": [
+            "Given the core binary without the plugin, when built, then no annotation scanner code is included",
+            "Given the core binary, when Ctrl+Shift+A is pressed without the plugin, then nothing happens",
+            "Given the plugin installed, when annotations features are used, then they work identically",
+            "Given the core README, when read, then TODO scanner is listed as an optional plugin"
+          ]
+        }
+      ]
+    }
+  ]
+}
