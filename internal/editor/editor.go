@@ -3891,14 +3891,13 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 		editorY := my - by - 1 // -1 for tab bar
 
 		// Adjust for breadcrumb bar in modern mode
-		gutterClickY := editorY
 		if ui.Style.Modern {
-			gutterClickY = editorY - 1 // breadcrumb takes a row
+			editorY-- // breadcrumb takes a row
 		}
 
 		// Gutter click: toggle bookmark
 		if editorX < 0 && gutterW > 0 && action == tview.MouseLeftClick {
-			lineIdx := tab.ScrollRow + gutterClickY
+			lineIdx := tab.ScrollRow + editorY
 			if lineIdx >= 0 && lineIdx < tab.Buffer.LineCount() {
 				e.ToggleBookmarkAtLine(lineIdx)
 				e.notifyChange()
