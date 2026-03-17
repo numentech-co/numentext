@@ -159,15 +159,18 @@ func (e *Editor) drawBlockquoteLine(screen tcell.Screen, editorX, screenY, maxWi
 		}
 	}
 
-	// Draw content after the bars
+	// Draw content after the bars with inline markdown formatting
 	textX := editorX + depth*2
-	textStyle := tcell.StyleDefault.Foreground(ui.ColorText).Background(bg)
-	for _, ch := range content {
-		if textX >= editorX+maxWidth {
-			break
+	baseStyle := tcell.StyleDefault.Foreground(ui.ColorText).Background(bg)
+	segments := ParseMarkdownLine(content, true, baseStyle)
+	for _, seg := range segments {
+		for _, ch := range seg.Text {
+			if textX >= editorX+maxWidth {
+				break
+			}
+			screen.SetContent(textX, screenY, ch, nil, seg.Style)
+			textX++
 		}
-		screen.SetContent(textX, screenY, ch, nil, textStyle)
-		textX++
 	}
 
 	return true
@@ -245,14 +248,17 @@ func (e *Editor) drawListLine(screen tcell.Screen, editorX, screenY, maxWidth in
 		}
 	}
 
-	// Draw content
-	textStyle := tcell.StyleDefault.Foreground(ui.ColorText).Background(bg)
-	for _, ch := range info.Content {
-		if sx >= editorX+maxWidth {
-			break
+	// Draw content with inline markdown formatting (bold, italic, code, links)
+	baseStyle := tcell.StyleDefault.Foreground(ui.ColorText).Background(bg)
+	segments := ParseMarkdownLine(info.Content, true, baseStyle)
+	for _, seg := range segments {
+		for _, ch := range seg.Text {
+			if sx >= editorX+maxWidth {
+				break
+			}
+			screen.SetContent(sx, screenY, ch, nil, seg.Style)
+			sx++
 		}
-		screen.SetContent(sx, screenY, ch, nil, textStyle)
-		sx++
 	}
 
 	return true
