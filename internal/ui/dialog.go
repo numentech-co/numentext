@@ -114,10 +114,8 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 	// File list
 	fileList := tview.NewList()
 	fileList.SetBackgroundColor(ColorBg)
-	fileList.SetMainTextColor(ColorTextWhite)
-	fileList.SetSecondaryTextColor(ColorTextGray)
-	fileList.SetSelectedTextColor(ColorSelectedText)
-	fileList.SetSelectedBackgroundColor(ColorSelected)
+	fileList.SetMainTextStyle(tcell.StyleDefault.Foreground(ColorText).Background(ColorBg))
+	fileList.SetSelectedStyle(tcell.StyleDefault.Foreground(ColorSelectedText).Background(ColorSelected))
 	fileList.ShowSecondaryText(false)
 
 	pathInput := tview.NewInputField()
@@ -384,24 +382,38 @@ func GoToLineDialog(app *tview.Application, onResult func(DialogResult)) tview.P
 
 // ConfirmDialog creates a confirmation dialog
 func ConfirmDialog(app *tview.Application, message string, onResult func(bool)) tview.Primitive {
-	modal := tview.NewModal()
-	modal.SetText(message)
-	modal.AddButtons([]string{"Yes", "No"})
-	modal.SetBackgroundColor(ColorDialogBg)
-	modal.SetTextColor(ColorStatusText)
-	modal.SetButtonBackgroundColor(ColorMenuHighlight)
-	modal.SetButtonTextColor(ColorMenuHlText)
-	modal.SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-		onResult(buttonLabel == "Yes")
+	form := tview.NewForm()
+	form.SetBackgroundColor(ColorDialogBg)
+	form.SetButtonBackgroundColor(ColorMenuHighlight)
+	form.SetButtonTextColor(ColorMenuHlText)
+	form.SetBorder(true)
+	form.SetBorderColor(ColorBorder)
+	setModernTitle(form, message)
+	form.SetTitleColor(ColorText)
+
+	form.AddButton("Yes", func() {
+		onResult(true)
 	})
-	return modal
+	form.AddButton("No", func() {
+		onResult(false)
+	})
+
+	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			onResult(false)
+			return nil
+		}
+		return event
+	})
+
+	return wrapDialogWithShadow(form, 45, 5)
 }
 
 // AboutDialog creates the about dialog
 func AboutDialog(app *tview.Application, onClose func()) tview.Primitive {
 	text := tview.NewTextView()
 	text.SetBackgroundColor(ColorDialogBg)
-	text.SetTextColor(ColorStatusText)
+	text.SetTextColor(ColorText)
 	text.SetTextAlign(tview.AlignCenter)
 	text.SetDynamicColors(true)
 	text.SetBorder(true)
