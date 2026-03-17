@@ -104,12 +104,12 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 	form.SetFieldBackgroundColor(ColorBg)
 	form.SetFieldTextColor(ColorTextWhite)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
-	form.SetButtonTextColor(ColorTextWhite)
-	form.SetLabelColor(ColorStatusText)
+	form.SetButtonTextColor(ColorMenuHlText)
+	form.SetLabelColor(ColorText)
 	form.SetTitle(" Open File ")
-	form.SetTitleColor(ColorStatusText)
+	form.SetTitleColor(ColorAccel)
 	form.SetBorder(true)
-	form.SetBorderColor(ColorStatusText)
+	form.SetBorderColor(ColorBorder)
 
 	// File list
 	fileList := tview.NewList()
@@ -126,7 +126,7 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 	pathInput.SetBackgroundColor(ColorDialogBg)
 	pathInput.SetFieldBackgroundColor(ColorBg)
 	pathInput.SetFieldTextColor(ColorTextWhite)
-	pathInput.SetLabelColor(ColorStatusText)
+	pathInput.SetLabelColor(ColorText)
 
 	var populateFiles func(dir string)
 	populateFiles = func(dir string) {
@@ -200,9 +200,9 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 
 	layout.SetBackgroundColor(ColorDialogBg)
 	layout.SetBorder(true)
-	layout.SetBorderColor(ColorStatusText)
+	layout.SetBorderColor(ColorBorder)
 	setModernTitle(layout, "Open File")
-	layout.SetTitleColor(ColorStatusText)
+	layout.SetTitleColor(ColorAccel)
 
 	// Handle escape on file list
 	fileList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -228,12 +228,12 @@ func SaveFileDialog(app *tview.Application, currentPath string, onResult func(Di
 	form.SetFieldBackgroundColor(ColorBg)
 	form.SetFieldTextColor(ColorTextWhite)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
-	form.SetButtonTextColor(ColorTextWhite)
-	form.SetLabelColor(ColorStatusText)
+	form.SetButtonTextColor(ColorMenuHlText)
+	form.SetLabelColor(ColorText)
 	form.SetBorder(true)
-	form.SetBorderColor(ColorStatusText)
+	form.SetBorderColor(ColorBorder)
 	setModernTitle(form, "Save As")
-	form.SetTitleColor(ColorStatusText)
+	form.SetTitleColor(ColorAccel)
 
 	form.AddInputField("File path:", currentPath, 50, nil, nil)
 	form.AddButton("Save", func() {
@@ -264,12 +264,12 @@ func FindDialog(app *tview.Application, onResult func(DialogResult)) tview.Primi
 	form.SetFieldBackgroundColor(ColorBg)
 	form.SetFieldTextColor(ColorTextWhite)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
-	form.SetButtonTextColor(ColorTextWhite)
-	form.SetLabelColor(ColorStatusText)
+	form.SetButtonTextColor(ColorMenuHlText)
+	form.SetLabelColor(ColorText)
 	form.SetBorder(true)
-	form.SetBorderColor(ColorStatusText)
+	form.SetBorderColor(ColorBorder)
 	setModernTitle(form, "Find")
-	form.SetTitleColor(ColorStatusText)
+	form.SetTitleColor(ColorAccel)
 
 	form.AddInputField("Search:", "", 40, nil, nil)
 	form.AddCheckbox("Regex:", false, func(checked bool) {
@@ -304,12 +304,12 @@ func ReplaceDialog(app *tview.Application, onFind func(DialogResult), onReplace 
 	form.SetFieldBackgroundColor(ColorBg)
 	form.SetFieldTextColor(ColorTextWhite)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
-	form.SetButtonTextColor(ColorTextWhite)
-	form.SetLabelColor(ColorStatusText)
+	form.SetButtonTextColor(ColorMenuHlText)
+	form.SetLabelColor(ColorText)
 	form.SetBorder(true)
-	form.SetBorderColor(ColorStatusText)
+	form.SetBorderColor(ColorBorder)
 	setModernTitle(form, "Replace")
-	form.SetTitleColor(ColorStatusText)
+	form.SetTitleColor(ColorAccel)
 
 	form.AddInputField("Find:", "", 40, nil, nil)
 	form.AddInputField("Replace:", "", 40, nil, nil)
@@ -355,12 +355,12 @@ func GoToLineDialog(app *tview.Application, onResult func(DialogResult)) tview.P
 	form.SetFieldBackgroundColor(ColorBg)
 	form.SetFieldTextColor(ColorTextWhite)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
-	form.SetButtonTextColor(ColorTextWhite)
-	form.SetLabelColor(ColorStatusText)
+	form.SetButtonTextColor(ColorMenuHlText)
+	form.SetLabelColor(ColorText)
 	form.SetBorder(true)
-	form.SetBorderColor(ColorStatusText)
+	form.SetBorderColor(ColorBorder)
 	setModernTitle(form, "Go to Line")
-	form.SetTitleColor(ColorStatusText)
+	form.SetTitleColor(ColorAccel)
 
 	form.AddInputField("Line number:", "", 20, tview.InputFieldInteger, nil)
 	form.AddButton("Go", func() {
@@ -390,7 +390,7 @@ func ConfirmDialog(app *tview.Application, message string, onResult func(bool)) 
 	modal.SetBackgroundColor(ColorDialogBg)
 	modal.SetTextColor(ColorStatusText)
 	modal.SetButtonBackgroundColor(ColorMenuHighlight)
-	modal.SetButtonTextColor(ColorTextWhite)
+	modal.SetButtonTextColor(ColorMenuHlText)
 	modal.SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 		onResult(buttonLabel == "Yes")
 	})
@@ -405,9 +405,9 @@ func AboutDialog(app *tview.Application, onClose func()) tview.Primitive {
 	text.SetTextAlign(tview.AlignCenter)
 	text.SetDynamicColors(true)
 	text.SetBorder(true)
-	text.SetBorderColor(ColorStatusText)
+	text.SetBorderColor(ColorBorder)
 	setModernTitle(text, "About NumenText")
-	text.SetTitleColor(ColorStatusText)
+	text.SetTitleColor(ColorAccel)
 
 	content := `
 [white::b]NumenText[-::-]
@@ -443,9 +443,9 @@ func MessageDialog(app *tview.Application, title, body string, onClose func()) t
 	text.SetDynamicColors(true)
 	text.SetScrollable(true)
 	text.SetBorder(true)
-	text.SetBorderColor(ColorStatusText)
+	text.SetBorderColor(ColorBorder)
 	setModernTitle(text, title)
-	text.SetTitleColor(ColorStatusText)
+	text.SetTitleColor(ColorAccel)
 	text.SetText(tview.Escape(body))
 
 	text.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -496,12 +496,12 @@ func GoToAddressDialog(app *tview.Application, onResult func(DialogResult)) tvie
 	form.SetFieldBackgroundColor(ColorBg)
 	form.SetFieldTextColor(ColorTextWhite)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
-	form.SetButtonTextColor(ColorTextWhite)
-	form.SetLabelColor(ColorStatusText)
+	form.SetButtonTextColor(ColorMenuHlText)
+	form.SetLabelColor(ColorText)
 	form.SetBorder(true)
-	form.SetBorderColor(ColorStatusText)
+	form.SetBorderColor(ColorBorder)
 	setModernTitle(form, "Go to Address")
-	form.SetTitleColor(ColorStatusText)
+	form.SetTitleColor(ColorAccel)
 
 	form.AddInputField("Hex offset:", "", 20, nil, nil)
 	form.AddButton("Go", func() {
