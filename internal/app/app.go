@@ -20,6 +20,7 @@ import (
 	"numentext/internal/filetree"
 	"numentext/internal/hexview"
 	"numentext/internal/mergeview"
+	"numentext/internal/notebook"
 	"numentext/internal/lsp"
 	"numentext/internal/output"
 	"numentext/internal/runner"
@@ -87,6 +88,10 @@ type App struct {
 	// Merge view
 	mergeView     *mergeview.MergeView // active merge view (nil when not in merge mode)
 	mergeViewMode bool                 // true when merge view is displayed instead of editor
+
+	// Notebook view
+	notebookView     *notebook.NotebookView // active notebook view (nil when not in notebook mode)
+	notebookViewMode bool                   // true when notebook view is displayed instead of editor
 }
 
 func New() *App {
@@ -304,6 +309,8 @@ func (a *App) setupMenus() {
 			}},
 			{Label: "---"},
 			{Label: "Merge View", Accel: 'e', Action: a.openMergeView},
+			{Label: "---"},
+			{Label: "Open as Notebook", Accel: 'n', Action: a.openCurrentAsNotebook},
 		},
 	}
 
@@ -512,7 +519,9 @@ func (a *App) buildFileMenuItems() []*ui.MenuItem {
 
 func (a *App) openRecentFile(path string) {
 	a.openFileSmartDetect(path)
-	if a.hexViewMode {
+	if a.notebookViewMode {
+		a.tviewApp.SetFocus(a.notebookView)
+	} else if a.hexViewMode {
 		a.tviewApp.SetFocus(a.hexView)
 	} else {
 		a.tviewApp.SetFocus(a.editor)
@@ -649,6 +658,8 @@ func (a *App) setupKeybindings() {
 			case 's':
 				if shift {
 					a.saveFileAs()
+				} else if a.notebookViewMode {
+					a.saveNotebookView()
 				} else if a.mergeViewMode {
 					a.saveMergeView()
 				} else if a.hexViewMode {
@@ -755,7 +766,9 @@ func (a *App) setupKeybindings() {
 			}
 			if a.menuBar.IsOpen() {
 				a.menuBar.Close()
-				if a.mergeViewMode {
+				if a.notebookViewMode {
+					a.tviewApp.SetFocus(a.notebookView)
+				} else if a.mergeViewMode {
 					a.tviewApp.SetFocus(a.mergeView)
 				} else if a.hexViewMode {
 					a.tviewApp.SetFocus(a.hexView)
@@ -768,8 +781,11 @@ func (a *App) setupKeybindings() {
 				// Let the dialog handle Escape
 				return event
 			}
-			// Return focus to editor/hex/merge view from file tree/output/terminal
-			if a.mergeViewMode {
+			// Return focus to editor/hex/merge/notebook view from file tree/output/terminal
+			if a.notebookViewMode {
+				a.tviewApp.SetFocus(a.notebookView)
+				a.statusBar.SetFocusedPanel("Notebook")
+			} else if a.mergeViewMode {
 				a.tviewApp.SetFocus(a.mergeView)
 				a.statusBar.SetFocusedPanel("Merge View")
 			} else if a.hexViewMode {
@@ -935,6 +951,20 @@ func (a *App) setupKeybindings() {
 			}
 		}
 
+		// Notebook-specific shortcuts
+		if a.notebookViewMode && a.notebookView != nil {
+			if key == tcell.KeyEnter && shift {
+				// Shift+Enter: execute current cell and advance
+				a.executeNotebookCell()
+				return nil
+			}
+			if ctrl && shift && key == tcell.KeyEnter {
+				// Ctrl+Shift+Enter: execute all cells
+				a.executeAllNotebookCells()
+				return nil
+			}
+		}
+
 		return event
 	})
 }
@@ -1066,7 +1096,9 @@ func (a *App) focusPanel(name string) {
 	case "filetree":
 		a.tviewApp.SetFocus(a.fileTree)
 	case "editor":
-		if a.mergeViewMode && a.mergeView != nil {
+		if a.notebookViewMode && a.notebookView != nil {
+			a.tviewApp.SetFocus(a.notebookView)
+		} else if a.mergeViewMode && a.mergeView != nil {
 			a.tviewApp.SetFocus(a.mergeView)
 		} else if a.hexViewMode && a.hexView != nil {
 			a.tviewApp.SetFocus(a.hexView)
@@ -1082,7 +1114,9 @@ func (a *App) focusPanel(name string) {
 	}
 	a.updatePanelBorders()
 	displayName := panelDisplayName(name)
-	if name == "editor" && a.mergeViewMode {
+	if name == "editor" && a.notebookViewMode {
+		displayName = "Notebook"
+	} else if name == "editor" && a.mergeViewMode {
 		displayName = "Merge View"
 	} else if name == "editor" && a.hexViewMode {
 		displayName = "Hex View"
@@ -1137,6 +1171,10 @@ func (a *App) nextPanel() {
 }
 
 func (a *App) updateStatusBar() {
+	if a.notebookViewMode && a.notebookView != nil {
+		a.updateNotebookStatusBar()
+		return
+	}
 	if a.mergeViewMode && a.mergeView != nil {
 		a.updateMergeStatusBar()
 		return
@@ -1187,12 +1225,17 @@ func (a *App) openFileSmartDetect(path string) {
 		return
 	}
 
-	if hexview.IsBinaryData(data) {
+	if notebook.IsNotebookFile(path) {
+		a.showNotebookView(path, data)
+	} else if hexview.IsBinaryData(data) {
 		a.showHexView(path, data)
 	} else {
 		// If currently in hex view mode, switch back to text editor
 		if a.hexViewMode {
 			a.hideHexView()
+		}
+		if a.notebookViewMode {
+			a.hideNotebookView()
 		}
 		if err := a.editor.OpenFile(path); err != nil {
 			a.output.AppendError("Error opening file: " + err.Error())
@@ -1472,6 +1515,147 @@ func (a *App) StartMergeMode() {
 		return
 	}
 	a.showMergeView(a.mergeView)
+}
+
+// --- Notebook View ---
+
+// showNotebookView switches the editor area to show a notebook view.
+func (a *App) showNotebookView(filePath string, data []byte) {
+	nv, err := notebook.New(filePath, data)
+	if err != nil {
+		a.output.AppendError("Error opening notebook: " + err.Error())
+		return
+	}
+	nv.SetOnChange(func() {
+		a.updateStatusBar()
+	})
+
+	// Hide other special views first
+	if a.hexViewMode {
+		a.hideHexView()
+	}
+	if a.mergeViewMode {
+		a.hideMergeView()
+	}
+
+	a.notebookView = nv
+	a.notebookViewMode = true
+
+	// Replace the editor in the layout with the notebook view
+	a.layout.Editor = nv
+	a.layout.RebuildMainFlex()
+	a.tviewApp.SetFocus(nv)
+	a.updateStatusBar()
+	a.statusBar.SetFocusedPanel("Notebook")
+}
+
+// hideNotebookView switches back from notebook view to the text editor.
+func (a *App) hideNotebookView() {
+	if !a.notebookViewMode {
+		return
+	}
+	if a.notebookView != nil {
+		a.notebookView.Shutdown()
+	}
+	a.notebookViewMode = false
+	a.notebookView = nil
+
+	// Restore the editor in the layout
+	a.layout.Editor = a.editor
+	a.layout.RebuildMainFlex()
+	a.tviewApp.SetFocus(a.editor)
+	a.updateStatusBar()
+	a.statusBar.SetFocusedPanel("Editor")
+}
+
+// openCurrentAsNotebook opens the current file in notebook view (View > Open as Notebook).
+func (a *App) openCurrentAsNotebook() {
+	if a.notebookViewMode {
+		a.statusBar.SetMessage("Already in notebook view")
+		return
+	}
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		a.statusBar.SetMessage("No file open")
+		return
+	}
+	data, err := os.ReadFile(tab.FilePath)
+	if err != nil {
+		a.output.AppendError("Error reading file: " + err.Error())
+		return
+	}
+	a.showNotebookView(tab.FilePath, data)
+}
+
+// updateNotebookStatusBar updates the status bar for notebook view mode.
+func (a *App) updateNotebookStatusBar() {
+	if a.notebookView == nil {
+		return
+	}
+	status := a.notebookView.StatusText()
+	filePath := a.notebookView.FilePath()
+	parts := strings.Split(filePath, "/")
+	name := parts[len(parts)-1]
+	a.statusBar.SetMessage(status)
+	a.statusBar.Update(name, 0, 0, "Notebook", a.notebookView.Modified())
+}
+
+// saveNotebookView saves the notebook view data.
+func (a *App) saveNotebookView() {
+	if !a.notebookViewMode || a.notebookView == nil {
+		return
+	}
+	if err := a.notebookView.Save(); err != nil {
+		a.output.AppendError("Error saving notebook: " + err.Error())
+	} else {
+		a.statusBar.SetMessage("Notebook saved")
+	}
+}
+
+// executeNotebookCell executes the current cell in the notebook (Shift+Enter).
+func (a *App) executeNotebookCell() {
+	if !a.notebookViewMode || a.notebookView == nil {
+		return
+	}
+	a.statusBar.SetMessage("Executing cell...")
+	go func() {
+		err := a.notebookView.ExecuteCurrentAndAdvance()
+		a.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				a.output.AppendError("Cell execution error: " + err.Error())
+			}
+			a.updateStatusBar()
+		})
+	}()
+}
+
+// executeAllNotebookCells executes all cells in the notebook.
+func (a *App) executeAllNotebookCells() {
+	if !a.notebookViewMode || a.notebookView == nil {
+		return
+	}
+	a.statusBar.SetMessage("Executing all cells...")
+	go func() {
+		err := a.notebookView.ExecuteAllCells()
+		a.tviewApp.QueueUpdateDraw(func() {
+			if err != nil {
+				a.output.AppendError("Execution error: " + err.Error())
+			} else {
+				a.statusBar.SetMessage("All cells executed")
+			}
+			a.updateStatusBar()
+		})
+	}()
+}
+
+// restartNotebookKernel restarts the notebook kernel.
+func (a *App) restartNotebookKernel() {
+	if !a.notebookViewMode || a.notebookView == nil {
+		return
+	}
+	a.notebookView.RestartKernel()
+	a.statusBar.SetMessage("Kernel restarted")
+	a.updateStatusBar()
 }
 
 // showCommandPalette opens the command palette overlay.
@@ -1897,6 +2081,23 @@ func (a *App) applyLSPEdits(tab *editor.Tab, edits []lsp.TextEdit) {
 }
 
 func (a *App) closeTab() {
+	// If in notebook view mode, close the notebook view and return to editor
+	if a.notebookViewMode && a.notebookView != nil {
+		if a.notebookView.Modified() {
+			dialog := ui.ConfirmDialog(a.tviewApp, "Save changes to notebook?", func(yes bool) {
+				a.layout.HideDialog("confirm")
+				if yes {
+					a.saveNotebookView()
+				}
+				a.hideNotebookView()
+			})
+			a.layout.ShowDialog("confirm", dialog)
+		} else {
+			a.hideNotebookView()
+		}
+		return
+	}
+
 	// If in merge view mode, close the merge view and return to editor
 	if a.mergeViewMode && a.mergeView != nil {
 		if a.mergeView.Modified() {
