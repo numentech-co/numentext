@@ -19,7 +19,6 @@ import (
 	"numentext/internal/editor/keymode"
 	"numentext/internal/filetree"
 	"numentext/internal/hexview"
-	"numentext/internal/mergeview"
 	"numentext/internal/notebook"
 	"numentext/internal/lsp"
 	"numentext/internal/output"
@@ -85,10 +84,6 @@ type App struct {
 	// Hex view
 	hexView     *hexview.HexView // active hex view (nil when in text editor mode)
 	hexViewMode bool             // true when hex view is displayed instead of editor
-
-	// Merge view
-	mergeView     *mergeview.MergeView // active merge view (nil when not in merge mode)
-	mergeViewMode bool                 // true when merge view is displayed instead of editor
 
 	// Plugin system
 	pluginManager *plugin.Manager
@@ -306,14 +301,10 @@ func (a *App) setupMenus() {
 			{Label: "Open as Hex", Accel: 'h', Action: a.openCurrentAsHex},
 			{Label: "Open as Text", Accel: 't', Action: a.openCurrentAsText},
 			{Label: "---"},
-			{Label: "Git Diff", Accel: 'g', Action: a.showGitDiff},
-			{Label: "---"},
 			{Label: "Markdown Preview", Accel: 'm', Action: func() {
 				a.editor.ToggleMarkdownMode()
 				a.statusBar.SetMarkdownMode(a.editor.IsMarkdownMode())
 			}},
-			{Label: "---"},
-			{Label: "Merge View", Accel: 'e', Action: a.openMergeView},
 			{Label: "---"},
 			{Label: "Open as Notebook", Accel: 'n', Action: a.openCurrentAsNotebook},
 		},
@@ -667,8 +658,6 @@ func (a *App) setupKeybindings() {
 					a.saveFileAs()
 				} else if a.notebookViewMode {
 					a.saveNotebookView()
-				} else if a.mergeViewMode {
-					a.saveMergeView()
 				} else if a.hexViewMode {
 					a.saveHexView()
 				} else {
@@ -735,15 +724,6 @@ func (a *App) setupKeybindings() {
 				a.editor.HandleAction(editor.ActionMatchBracket, 0)
 				return nil
 			case 'e':
-				if a.mergeViewMode && a.mergeView != nil {
-					if shift {
-						a.mergeView.PrevConflict()
-					} else {
-						a.mergeView.NextConflict()
-					}
-					a.updateStatusBar()
-					return nil
-				}
 				if len(a.buildErrors) > 0 {
 					if shift {
 						a.prevBuildError()
@@ -775,8 +755,6 @@ func (a *App) setupKeybindings() {
 				a.menuBar.Close()
 				if a.notebookViewMode {
 					a.tviewApp.SetFocus(a.notebookView)
-				} else if a.mergeViewMode {
-					a.tviewApp.SetFocus(a.mergeView)
 				} else if a.hexViewMode {
 					a.tviewApp.SetFocus(a.hexView)
 				} else {
@@ -788,13 +766,10 @@ func (a *App) setupKeybindings() {
 				// Let the dialog handle Escape
 				return event
 			}
-			// Return focus to editor/hex/merge/notebook view from file tree/output/terminal
+			// Return focus to editor/hex/notebook view from file tree/output/terminal
 			if a.notebookViewMode {
 				a.tviewApp.SetFocus(a.notebookView)
 				a.statusBar.SetFocusedPanel("Notebook")
-			} else if a.mergeViewMode {
-				a.tviewApp.SetFocus(a.mergeView)
-				a.statusBar.SetFocusedPanel("Merge View")
 			} else if a.hexViewMode {
 				a.tviewApp.SetFocus(a.hexView)
 				a.statusBar.SetFocusedPanel("Hex View")
@@ -1105,8 +1080,6 @@ func (a *App) focusPanel(name string) {
 	case "editor":
 		if a.notebookViewMode && a.notebookView != nil {
 			a.tviewApp.SetFocus(a.notebookView)
-		} else if a.mergeViewMode && a.mergeView != nil {
-			a.tviewApp.SetFocus(a.mergeView)
 		} else if a.hexViewMode && a.hexView != nil {
 			a.tviewApp.SetFocus(a.hexView)
 		} else {
@@ -1123,8 +1096,6 @@ func (a *App) focusPanel(name string) {
 	displayName := panelDisplayName(name)
 	if name == "editor" && a.notebookViewMode {
 		displayName = "Notebook"
-	} else if name == "editor" && a.mergeViewMode {
-		displayName = "Merge View"
 	} else if name == "editor" && a.hexViewMode {
 		displayName = "Hex View"
 	}
@@ -1180,10 +1151,6 @@ func (a *App) nextPanel() {
 func (a *App) updateStatusBar() {
 	if a.notebookViewMode && a.notebookView != nil {
 		a.updateNotebookStatusBar()
-		return
-	}
-	if a.mergeViewMode && a.mergeView != nil {
-		a.updateMergeStatusBar()
 		return
 	}
 	if a.hexViewMode && a.hexView != nil {
@@ -1390,155 +1357,15 @@ func (a *App) saveHexView() {
 	}
 }
 
-// openMergeView opens a merge view for the current file if it has conflict markers.
-// It extracts LOCAL/BASE/REMOTE via git show :1:/:2:/:3:file.
-func (a *App) openMergeView() {
-	if a.mergeViewMode {
-		a.statusBar.SetMessage("Already in merge view")
-		return
-	}
-
-	tab := a.editor.ActiveTab()
-	if tab == nil || tab.FilePath == "" {
-		a.statusBar.SetMessage("No file open")
-		return
-	}
-
-	content := tab.Buffer.Text()
-
-	if mergeview.HasConflictMarkers(content) {
-		// Parse conflict markers directly
-		mv := mergeview.NewFromConflictFile(content, tab.FilePath)
-		a.showMergeView(mv)
-		return
-	}
-
-	// Try to extract from git stages
-	relPath := tab.FilePath
-	// Make path relative to workDir if possible
-	if strings.HasPrefix(relPath, a.workDir+"/") {
-		relPath = relPath[len(a.workDir)+1:]
-	}
-
-	baseOut, err1 := a.gitShow(":1:" + relPath)
-	localOut, err2 := a.gitShow(":2:" + relPath)
-	remoteOut, err3 := a.gitShow(":3:" + relPath)
-
-	if err1 != nil || err2 != nil || err3 != nil {
-		a.statusBar.SetMessage("No merge conflicts detected in this file")
-		return
-	}
-
-	local := mergeview.SplitLinesPublic(localOut)
-	base := mergeview.SplitLinesPublic(baseOut)
-	remote := mergeview.SplitLinesPublic(remoteOut)
-
-	// Result starts with current file content
-	result := mergeview.SplitLinesPublic(content)
-
-	// Parse three-way to detect conflicts
-	_, _, _, _, conflicts := mergeview.ParseThreeWay(localOut, baseOut, remoteOut)
-
-	mv := mergeview.New(local, base, remote, result, conflicts, tab.FilePath)
-	a.showMergeView(mv)
-}
-
-// gitShow runs "git show <ref>" and returns the output.
-func (a *App) gitShow(ref string) (string, error) {
-	cmd := exec.Command("git", "-C", a.workDir, "show", ref)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
-// showMergeView switches the editor area to show a merge view.
-func (a *App) showMergeView(mv *mergeview.MergeView) {
-	mv.SetOnStatusMessage(func(msg string) {
-		a.statusBar.SetMessage(msg)
-	})
-	mv.SetOnChange(func() {
-		a.updateStatusBar()
-	})
-	mv.SetOnClose(func(saved bool) {
-		a.hideMergeView()
-	})
-
-	a.mergeView = mv
-	a.mergeViewMode = true
-
-	// Replace the editor in the layout with the merge view
-	a.layout.Editor = mv
-	a.layout.RebuildMainFlex()
-	a.tviewApp.SetFocus(mv)
-	a.updateStatusBar()
-	a.statusBar.SetFocusedPanel("Merge View")
-}
-
-// hideMergeView switches back from merge view to the text editor.
-func (a *App) hideMergeView() {
-	if !a.mergeViewMode {
-		return
-	}
-	a.mergeViewMode = false
-	a.mergeView = nil
-
-	// Restore the editor in the layout
-	a.layout.Editor = a.editor
-	a.layout.RebuildMainFlex()
-	a.tviewApp.SetFocus(a.editor)
-	a.updateStatusBar()
-	a.statusBar.SetFocusedPanel("Editor")
-}
-
-// updateMergeStatusBar updates the status bar for merge view mode.
-func (a *App) updateMergeStatusBar() {
-	if a.mergeView == nil {
-		return
-	}
-	status := a.mergeView.StatusText()
-	outPath := a.mergeView.OutputPath()
-	name := outPath
-	parts := strings.Split(outPath, "/")
-	if len(parts) > 0 {
-		name = parts[len(parts)-1]
-	}
-	a.statusBar.Update(name, 0, 0, "Merge", a.mergeView.Modified())
-	a.statusBar.SetMessage(status)
-	a.statusBar.SetModeInfo("", "")
-}
-
-// saveMergeView saves the merge view result.
-func (a *App) saveMergeView() {
-	if !a.mergeViewMode || a.mergeView == nil {
-		return
-	}
-	if err := a.mergeView.Save(); err != nil {
-		a.output.AppendError("Error saving merge result: " + err.Error())
-	} else {
-		a.statusBar.SetMessage("Merge result saved")
-	}
-}
-
-// OpenMergeFiles opens the merge view directly from three files (for CLI --merge flag).
+// OpenMergeFiles is a stub -- merge view has been moved to the numentext-git plugin.
+// Returns an error directing the user to install the plugin.
 func (a *App) OpenMergeFiles(localPath, basePath, remotePath, outputPath string) error {
-	mv, err := mergeview.NewFromThreeFiles(localPath, basePath, remotePath, outputPath)
-	if err != nil {
-		return err
-	}
-	// Defer showing until app runs (setupUI must complete first)
-	a.mergeView = mv
-	return nil
+	return fmt.Errorf("install numentext-git plugin for merge support")
 }
 
-// StartMergeMode activates the merge view that was set up by OpenMergeFiles.
-// Must be called after setupUI completes.
+// StartMergeMode is a stub -- merge view has been moved to the numentext-git plugin.
 func (a *App) StartMergeMode() {
-	if a.mergeView == nil {
-		return
-	}
-	a.showMergeView(a.mergeView)
+	// No-op: merge view moved to plugin
 }
 
 // --- Notebook View ---
@@ -1557,9 +1384,6 @@ func (a *App) showNotebookView(filePath string, data []byte) {
 	// Hide other special views first
 	if a.hexViewMode {
 		a.hideHexView()
-	}
-	if a.mergeViewMode {
-		a.hideMergeView()
 	}
 
 	a.notebookView = nv
@@ -1886,14 +1710,6 @@ func (a *App) saveFile() {
 	if a.annotationsVisible {
 		a.refreshAnnotations()
 	}
-	// Refresh git diff markers after save
-	filePath := tab.FilePath
-	go func() {
-		a.editor.RefreshDiffMarkersForTab(filePath)
-		a.tviewApp.QueueUpdateDraw(func() {})
-	}()
-
-
 	// Refresh file tree in case a new file was saved
 	a.fileTree.Refresh()
 
@@ -2123,31 +1939,6 @@ func (a *App) closeTab() {
 			a.layout.ShowDialog("confirm", dialog)
 		} else {
 			a.hideNotebookView()
-		}
-		return
-	}
-
-	// If in merge view mode, close the merge view and return to editor
-	if a.mergeViewMode && a.mergeView != nil {
-		if a.mergeView.Modified() {
-			dialog := ui.ConfirmDialog(a.tviewApp, "Save merge result before closing?", func(yes bool) {
-				a.layout.HideDialog("confirm")
-				if yes {
-					a.saveMergeView()
-				}
-				a.hideMergeView()
-			})
-			a.layout.ShowDialog("confirm", dialog)
-		} else if a.mergeView.UnresolvedCount() > 0 {
-			dialog := ui.ConfirmDialog(a.tviewApp, fmt.Sprintf("%d unresolved conflicts. Close anyway?", a.mergeView.UnresolvedCount()), func(yes bool) {
-				a.layout.HideDialog("confirm")
-				if yes {
-					a.hideMergeView()
-				}
-			})
-			a.layout.ShowDialog("confirm", dialog)
-		} else {
-			a.hideMergeView()
 		}
 		return
 	}
@@ -2753,21 +2544,6 @@ func (a *App) showAbout() {
 	a.layout.ShowDialog("about", dialog)
 }
 
-func (a *App) showGitDiff() {
-	diff, err := a.editor.GetCurrentFileDiff()
-	diffText := ""
-	if err != nil {
-		diffText = ""
-	} else {
-		diffText = diff
-	}
-	dialog := ui.GitDiffDialog(a.tviewApp, diffText, func() {
-		a.layout.HideDialog("gitdiff")
-		a.tviewApp.SetFocus(a.editor)
-	})
-	a.layout.ShowDialog("gitdiff", dialog)
-}
-
 func (a *App) showToolsConfig() {
 	text := tview.NewTextView()
 	text.SetBackgroundColor(ui.ColorDialogBg)
@@ -2970,8 +2746,6 @@ func (a *App) setupLSP() {
 		go func() {
 			a.lspManager.NotifyOpen(filePath, text)
 			a.refreshBreadcrumb(filePath)
-			// Refresh git diff markers for the newly opened file
-			a.editor.RefreshDiffMarkersForTab(filePath)
 			a.tviewApp.QueueUpdateDraw(func() {})
 		}()
 		// Track opened file language and prompt for LSP install if needed
@@ -4187,6 +3961,38 @@ func (a *App) ShowPanel(name string)                  { a.PluginShowPanel(name) 
 func (a *App) HidePanel(name string)                  { a.PluginHidePanel(name) }
 func (a *App) SetPanelContent(name, text string)      { a.PluginSetPanelContent(name, text) }
 func (a *App) AppendPanelContent(name, text string)   { a.PluginAppendPanelContent(name, text) }
+func (a *App) Exec(command string, args []string, workDir string) (string, error) {
+	cmd := exec.Command(command, args...)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+func (a *App) SetGutterMarkers(filePath string, markers map[int]string) {
+	for _, tab := range a.editor.Tabs() {
+		if tab.FilePath == filePath {
+			if len(markers) == 0 {
+				tab.DiffMarkers = nil
+				tab.DiffAllAdded = false
+				return
+			}
+			tab.DiffMarkers = make(map[int]editor.DiffChangeType)
+			for line, kind := range markers {
+				switch kind {
+				case "added":
+					tab.DiffMarkers[line] = editor.DiffAdded
+				case "modified":
+					tab.DiffMarkers[line] = editor.DiffModified
+				case "deleted":
+					tab.DiffMarkers[line] = editor.DiffDeleted
+				}
+			}
+			tab.DiffAllAdded = false
+			return
+		}
+	}
+}
 
 // showPluginsDialog displays a list of installed plugins with enable/disable toggle.
 func (a *App) showPluginsDialog() {

@@ -50,6 +50,10 @@ func (h *mockHost) AddMenuItem(menuName, label string, action func()) {
 func (h *mockHost) AddCommand(id, title string, action func()) {
 	h.commands[id] = action
 }
+func (h *mockHost) Exec(command string, args []string, workDir string) (string, error) {
+	return "", nil
+}
+func (h *mockHost) SetGutterMarkers(filePath string, markers map[int]string) {}
 
 func createTestPlugin(t *testing.T, dir, name, initLua string) string {
 	t.Helper()
