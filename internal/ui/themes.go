@@ -7,10 +7,10 @@ type Theme struct {
 	Name string
 
 	// Main backgrounds
-	Bg, BgDarker, MenuBg, StatusBg, OutputBg, OutputBgAlt, DialogBg, GutterBg tcell.Color
+	Bg, BgAlt, MenuBg, StatusBg, OutputBg, OutputBgStripe, DialogBg, GutterBg tcell.Color
 
 	// Text colors
-	Text, TextWhite, TextGray, MenuText, StatusText, GutterText tcell.Color
+	Text, TextPrimary, TextMuted, MenuText, StatusText, GutterText tcell.Color
 
 	// Syntax highlighting
 	Keyword, String, Comment, Number, Type, Func tcell.Color
@@ -35,16 +35,16 @@ var themes = map[string]*Theme{
 	"borland": {
 		Name:         "borland",
 		Bg:           tcell.NewRGBColor(0, 0, 128),
-		BgDarker:     tcell.NewRGBColor(0, 0, 100),
+		BgAlt:     tcell.NewRGBColor(0, 0, 100),
 		MenuBg:       tcell.NewRGBColor(0, 170, 170),
 		StatusBg:     tcell.NewRGBColor(0, 170, 170),
 		OutputBg:     tcell.NewRGBColor(0, 0, 80),
-		OutputBgAlt:  tcell.NewRGBColor(0, 0, 60),
+		OutputBgStripe:  tcell.NewRGBColor(0, 0, 60),
 		DialogBg:     tcell.NewRGBColor(0, 170, 170),
 		GutterBg:     tcell.NewRGBColor(0, 0, 100),
 		Text:         tcell.NewRGBColor(255, 255, 85),
-		TextWhite:    tcell.NewRGBColor(255, 255, 255),
-		TextGray:     tcell.NewRGBColor(170, 170, 170),
+		TextPrimary:    tcell.NewRGBColor(255, 255, 255),
+		TextMuted:     tcell.NewRGBColor(170, 170, 170),
 		MenuText:     tcell.NewRGBColor(255, 255, 255),
 		StatusText:   tcell.NewRGBColor(0, 0, 0),
 		GutterText:   tcell.NewRGBColor(170, 170, 170),
@@ -75,16 +75,16 @@ var themes = map[string]*Theme{
 	"modern-dark": {
 		Name:         "modern-dark",
 		Bg:           tcell.NewRGBColor(30, 30, 30),
-		BgDarker:     tcell.NewRGBColor(20, 20, 20),
+		BgAlt:     tcell.NewRGBColor(20, 20, 20),
 		MenuBg:       tcell.NewRGBColor(50, 50, 50),
 		StatusBg:     tcell.NewRGBColor(0, 122, 204),
 		OutputBg:     tcell.NewRGBColor(25, 25, 25),
-		OutputBgAlt:  tcell.NewRGBColor(35, 35, 35),
+		OutputBgStripe:  tcell.NewRGBColor(35, 35, 35),
 		DialogBg:     tcell.NewRGBColor(60, 60, 60),
 		GutterBg:     tcell.NewRGBColor(30, 30, 30),
 		Text:         tcell.NewRGBColor(212, 212, 212),
-		TextWhite:    tcell.NewRGBColor(255, 255, 255),
-		TextGray:     tcell.NewRGBColor(128, 128, 128),
+		TextPrimary:    tcell.NewRGBColor(255, 255, 255),
+		TextMuted:     tcell.NewRGBColor(128, 128, 128),
 		MenuText:     tcell.NewRGBColor(204, 204, 204),
 		StatusText:   tcell.NewRGBColor(255, 255, 255),
 		GutterText:   tcell.NewRGBColor(100, 100, 100),
@@ -115,16 +115,16 @@ var themes = map[string]*Theme{
 	"modern-light": {
 		Name:         "modern-light",
 		Bg:           tcell.NewRGBColor(255, 255, 255),
-		BgDarker:     tcell.NewRGBColor(240, 240, 240),
+		BgAlt:     tcell.NewRGBColor(240, 240, 240),
 		MenuBg:       tcell.NewRGBColor(221, 221, 221),
 		StatusBg:     tcell.NewRGBColor(0, 122, 204),
 		OutputBg:     tcell.NewRGBColor(245, 245, 245),
-		OutputBgAlt:  tcell.NewRGBColor(235, 235, 235),
+		OutputBgStripe:  tcell.NewRGBColor(235, 235, 235),
 		DialogBg:     tcell.NewRGBColor(240, 240, 240),
 		GutterBg:     tcell.NewRGBColor(245, 245, 245),
 		Text:         tcell.NewRGBColor(0, 0, 0),
-		TextWhite:    tcell.NewRGBColor(0, 0, 0),
-		TextGray:     tcell.NewRGBColor(128, 128, 128),
+		TextPrimary:    tcell.NewRGBColor(0, 0, 0),
+		TextMuted:     tcell.NewRGBColor(128, 128, 128),
 		MenuText:     tcell.NewRGBColor(51, 51, 51),
 		StatusText:   tcell.NewRGBColor(255, 255, 255),
 		GutterText:   tcell.NewRGBColor(150, 150, 150),
@@ -155,16 +155,16 @@ var themes = map[string]*Theme{
 	"solarized-dark": {
 		Name:         "solarized-dark",
 		Bg:           tcell.NewRGBColor(0, 43, 54),
-		BgDarker:     tcell.NewRGBColor(0, 34, 43),
+		BgAlt:     tcell.NewRGBColor(0, 34, 43),
 		MenuBg:       tcell.NewRGBColor(7, 54, 66),
 		StatusBg:     tcell.NewRGBColor(88, 110, 117),
 		OutputBg:     tcell.NewRGBColor(0, 34, 43),
-		OutputBgAlt:  tcell.NewRGBColor(7, 54, 66),
+		OutputBgStripe:  tcell.NewRGBColor(7, 54, 66),
 		DialogBg:     tcell.NewRGBColor(7, 54, 66),
 		GutterBg:     tcell.NewRGBColor(0, 34, 43),
 		Text:         tcell.NewRGBColor(131, 148, 150),
-		TextWhite:    tcell.NewRGBColor(253, 246, 227),
-		TextGray:     tcell.NewRGBColor(88, 110, 117),
+		TextPrimary:    tcell.NewRGBColor(253, 246, 227),
+		TextMuted:     tcell.NewRGBColor(88, 110, 117),
 		MenuText:     tcell.NewRGBColor(238, 232, 213),
 		StatusText:   tcell.NewRGBColor(253, 246, 227),
 		GutterText:   tcell.NewRGBColor(88, 110, 117),
@@ -207,17 +207,17 @@ func ApplyTheme(name string) {
 	}
 
 	ColorBg = t.Bg
-	ColorBgDarker = t.BgDarker
+	ColorBgAlt = t.BgAlt
 	ColorMenuBg = t.MenuBg
 	ColorStatusBg = t.StatusBg
 	ColorOutputBg = t.OutputBg
-	ColorOutputBgAlt = t.OutputBgAlt
+	ColorOutputBgStripe = t.OutputBgStripe
 	ColorDialogBg = t.DialogBg
 	ColorGutterBg = t.GutterBg
 
 	ColorText = t.Text
-	ColorTextWhite = t.TextWhite
-	ColorTextGray = t.TextGray
+	ColorTextPrimary = t.TextPrimary
+	ColorTextMuted = t.TextMuted
 	ColorMenuText = t.MenuText
 	ColorStatusText = t.StatusText
 	ColorGutterText = t.GutterText

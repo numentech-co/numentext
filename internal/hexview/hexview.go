@@ -338,8 +338,8 @@ func (hv *HexView) Draw(screen tcell.Screen) {
 		return
 	}
 
-	bgStyle := tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBg)
-	headerStyle := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorGutterBg)
+	bgStyle := tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg)
+	headerStyle := tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorGutterBg)
 	addrStyle := tcell.StyleDefault.Foreground(ui.ColorGutterText).Background(ui.ColorGutterBg)
 	hexStyle := tcell.StyleDefault.Foreground(ui.ColorText).Background(ui.ColorBg)
 	asciiStyle := tcell.StyleDefault.Foreground(ui.ColorString).Background(ui.ColorBg)
@@ -427,7 +427,7 @@ func (hv *HexView) Draw(screen tcell.Screen) {
 						style = cursorHexStyle
 					} else if hv.hasFocus {
 						// Highlight in hex pane when ASCII pane is focused
-						style = tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBgDarker)
+						style = tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBgAlt)
 					}
 				}
 
@@ -487,7 +487,7 @@ func (hv *HexView) Draw(screen tcell.Screen) {
 					if hv.focusPane == "ascii" && hv.hasFocus {
 						style = cursorAsciiStyle
 					} else if hv.hasFocus {
-						style = tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBgDarker)
+						style = tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBgAlt)
 					}
 				}
 				screen.SetContent(charX, screenY, ch, nil, style)

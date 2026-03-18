@@ -104,7 +104,7 @@ func (p *CommandPalette) Draw(screen tcell.Screen) {
 	bgStyle := tcell.StyleDefault.Foreground(ColorStatusText).Background(ColorDialogBg)
 	hlStyle := tcell.StyleDefault.Foreground(ColorMenuHlText).Background(ColorMenuHighlight)
 	scStyle := tcell.StyleDefault.Foreground(ColorMenuShortcut).Background(ColorDialogBg)
-	scHlStyle := tcell.StyleDefault.Foreground(ColorTextGray).Background(ColorMenuHighlight)
+	scHlStyle := tcell.StyleDefault.Foreground(ColorTextMuted).Background(ColorMenuHighlight)
 	borderStyle := tcell.StyleDefault.Foreground(ColorStatusText).Background(ColorDialogBg)
 
 	// Draw border frame (ASCII only, per project convention)
@@ -148,14 +148,14 @@ func (p *CommandPalette) Draw(screen tcell.Screen) {
 	for i, ch := range displayInput {
 		if inputStart+i < px+paletteW-1 {
 			screen.SetContent(inputStart+i, inputY, ch, nil,
-				tcell.StyleDefault.Foreground(ColorTextWhite).Background(ColorDialogBg))
+				tcell.StyleDefault.Foreground(ColorTextPrimary).Background(ColorDialogBg))
 		}
 	}
 	// Draw cursor (block)
 	cursorX := inputStart + len([]rune(displayInput))
 	if cursorX < px+paletteW-1 {
 		screen.SetContent(cursorX, inputY, '_', nil,
-			tcell.StyleDefault.Foreground(ColorTextWhite).Background(ColorDialogBg))
+			tcell.StyleDefault.Foreground(ColorTextPrimary).Background(ColorDialogBg))
 	}
 
 	// Separator between input and list

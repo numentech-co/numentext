@@ -317,7 +317,7 @@ func (e *Editor) drawFrontmatterLine(screen tcell.Screen, editorX, screenY, maxW
 
 	// Delimiter lines (---)
 	if trimmed == "---" {
-		delimStyle := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(bg)
+		delimStyle := tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(bg)
 		sx := editorX
 		for _, ch := range line {
 			if sx >= editorX+maxWidth {

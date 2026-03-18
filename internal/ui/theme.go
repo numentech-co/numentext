@@ -6,18 +6,18 @@ import "github.com/gdamore/tcell/v2"
 var (
 	// Main backgrounds
 	ColorBg        = tcell.NewRGBColor(0, 0, 128)     // Dark blue #000080
-	ColorBgDarker  = tcell.NewRGBColor(0, 0, 100)     // Darker blue
+	ColorBgAlt  = tcell.NewRGBColor(0, 0, 100)     // Darker blue
 	ColorMenuBg    = tcell.NewRGBColor(0, 170, 170)    // Cyan
 	ColorStatusBg  = tcell.NewRGBColor(0, 170, 170)    // Cyan
 	ColorOutputBg    = tcell.NewRGBColor(0, 0, 80)      // Very dark blue
-	ColorOutputBgAlt = tcell.NewRGBColor(0, 0, 60)     // Slightly darker blue for alternating blocks
+	ColorOutputBgStripe = tcell.NewRGBColor(0, 0, 60)     // Slightly darker blue for alternating blocks
 	ColorDialogBg  = tcell.NewRGBColor(0, 170, 170)    // Cyan for dialogs
 	ColorGutterBg  = tcell.NewRGBColor(0, 0, 100)      // Darker blue for gutter
 
 	// Text colors
 	ColorText       = tcell.NewRGBColor(255, 255, 85)  // Yellow
-	ColorTextWhite  = tcell.NewRGBColor(255, 255, 255) // White
-	ColorTextGray   = tcell.NewRGBColor(170, 170, 170) // Gray
+	ColorTextPrimary  = tcell.NewRGBColor(255, 255, 255) // White
+	ColorTextMuted   = tcell.NewRGBColor(170, 170, 170) // Gray
 	ColorMenuText   = tcell.NewRGBColor(255, 255, 255) // White
 	ColorStatusText = tcell.NewRGBColor(0, 0, 0)       // Black
 	ColorGutterText = tcell.NewRGBColor(170, 170, 170) // Gray
@@ -88,12 +88,12 @@ func ThemeStyle(role string) tcell.Style {
 	case "status":
 		return base.Foreground(ColorStatusText).Background(ColorStatusBg)
 	case "output":
-		return base.Foreground(ColorTextWhite).Background(ColorOutputBg)
+		return base.Foreground(ColorTextPrimary).Background(ColorOutputBg)
 	case "gutter":
 		return base.Foreground(ColorGutterText).Background(ColorGutterBg)
 	case "dialog":
 		return base.Foreground(ColorStatusText).Background(ColorDialogBg)
 	default:
-		return base.Foreground(ColorTextWhite).Background(ColorBg)
+		return base.Foreground(ColorTextPrimary).Background(ColorBg)
 	}
 }

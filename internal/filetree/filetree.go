@@ -93,7 +93,7 @@ func (ft *FileTree) createNode(path, name string, isDir bool) *tview.TreeNode {
 	node.SetSelectable(true)
 
 	if isDir {
-		node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBg))
+		node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg))
 		node.SetSelectedTextStyle(tcell.StyleDefault.Foreground(ui.ColorBg).Background(ui.ColorTreeSelected))
 	} else {
 		node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTreeText).Background(ui.ColorBg))
@@ -143,7 +143,7 @@ func (ft *FileTree) RefreshColors() {
 			if path, ok := ref.(string); ok {
 				info, err := os.Stat(path)
 				if err == nil && info.IsDir() {
-					node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBg))
+					node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg))
 					node.SetSelectedTextStyle(tcell.StyleDefault.Foreground(ui.ColorBg).Background(ui.ColorTreeSelected))
 				} else {
 					node.SetTextStyle(tcell.StyleDefault.Foreground(ui.ColorTreeText).Background(ui.ColorBg))

@@ -178,10 +178,10 @@ func (p *FilePalette) Draw(screen tcell.Screen) {
 
 	bgStyle := tcell.StyleDefault.Foreground(ColorStatusText).Background(ColorDialogBg)
 	hlStyle := tcell.StyleDefault.Foreground(ColorMenuHlText).Background(ColorMenuHighlight)
-	dimStyle := tcell.StyleDefault.Foreground(ColorTextGray).Background(ColorDialogBg)
-	dimHlStyle := tcell.StyleDefault.Foreground(ColorTextGray).Background(ColorMenuHighlight)
+	dimStyle := tcell.StyleDefault.Foreground(ColorTextMuted).Background(ColorDialogBg)
+	dimHlStyle := tcell.StyleDefault.Foreground(ColorTextMuted).Background(ColorMenuHighlight)
 	borderStyle := tcell.StyleDefault.Foreground(ColorStatusText).Background(ColorDialogBg)
-	nameStyle := tcell.StyleDefault.Foreground(ColorTextWhite).Background(ColorDialogBg)
+	nameStyle := tcell.StyleDefault.Foreground(ColorTextPrimary).Background(ColorDialogBg)
 	nameHlStyle := tcell.StyleDefault.Foreground(ColorMenuHlText).Background(ColorMenuHighlight)
 
 	// Top border with title
@@ -219,13 +219,13 @@ func (p *FilePalette) Draw(screen tcell.Screen) {
 	for i, ch := range displayInput {
 		if inputStart+i < px+paletteW-1 {
 			screen.SetContent(inputStart+i, inputY, ch, nil,
-				tcell.StyleDefault.Foreground(ColorTextWhite).Background(ColorDialogBg))
+				tcell.StyleDefault.Foreground(ColorTextPrimary).Background(ColorDialogBg))
 		}
 	}
 	cursorX := inputStart + len([]rune(displayInput))
 	if cursorX < px+paletteW-1 {
 		screen.SetContent(cursorX, inputY, '_', nil,
-			tcell.StyleDefault.Foreground(ColorTextWhite).Background(ColorDialogBg))
+			tcell.StyleDefault.Foreground(ColorTextPrimary).Background(ColorDialogBg))
 	}
 
 	// Separator

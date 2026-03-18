@@ -24,7 +24,7 @@ func New() *Panel {
 	}
 
 	p.SetBackgroundColor(ui.ColorOutputBg)
-	p.SetTextColor(ui.ColorTextWhite)
+	p.SetTextColor(ui.ColorTextPrimary)
 	p.SetDynamicColors(true)
 	p.SetScrollable(true)
 	p.SetBorder(true)
@@ -39,7 +39,7 @@ func New() *Panel {
 // RefreshColors re-applies theme colors.
 func (p *Panel) RefreshColors() {
 	p.SetBackgroundColor(ui.ColorOutputBg)
-	p.SetTextColor(ui.ColorTextWhite)
+	p.SetTextColor(ui.ColorTextPrimary)
 	p.SetTitleColor(ui.ColorPanelBlurred)
 	p.SetBorderColor(ui.ColorBorder)
 }

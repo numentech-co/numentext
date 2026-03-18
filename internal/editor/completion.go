@@ -173,7 +173,7 @@ func (cp *CompletionPopup) Draw(screen tcell.Screen, editorX, editorY, gutterWid
 		// Draw detail on the right
 		if item.Detail != "" {
 			_, bg, _ := style.Decompose()
-			detailStyle := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(bg)
+			detailStyle := tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(bg)
 			dx := popupX + maxWidth - len(item.Detail) - 1
 			for j, ch := range item.Detail {
 				screen.SetContent(dx+j, y, ch, nil, detailStyle)

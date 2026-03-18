@@ -101,7 +101,7 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 	// Create form
 	form := tview.NewForm()
 	form.SetBackgroundColor(ColorDialogBg)
-	form.SetFieldBackgroundColor(ColorBgDarker)
+	form.SetFieldBackgroundColor(ColorBgAlt)
 	form.SetFieldTextColor(ColorText)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
 	form.SetButtonTextColor(ColorMenuHlText)
@@ -122,7 +122,7 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 	pathInput.SetLabel("Path: ")
 	pathInput.SetText(currentDir)
 	pathInput.SetBackgroundColor(ColorDialogBg)
-	pathInput.SetFieldBackgroundColor(ColorBgDarker)
+	pathInput.SetFieldBackgroundColor(ColorBgAlt)
 	pathInput.SetFieldTextColor(ColorText)
 	pathInput.SetLabelStyle(tcell.StyleDefault.Foreground(ColorText).Background(ColorDialogBg))
 
@@ -223,7 +223,7 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 func SaveFileDialog(app *tview.Application, currentPath string, onResult func(DialogResult)) tview.Primitive {
 	form := tview.NewForm()
 	form.SetBackgroundColor(ColorDialogBg)
-	form.SetFieldBackgroundColor(ColorBgDarker)
+	form.SetFieldBackgroundColor(ColorBgAlt)
 	form.SetFieldTextColor(ColorText)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
 	form.SetButtonTextColor(ColorMenuHlText)
@@ -259,7 +259,7 @@ func FindDialog(app *tview.Application, onResult func(DialogResult)) tview.Primi
 
 	form := tview.NewForm()
 	form.SetBackgroundColor(ColorDialogBg)
-	form.SetFieldBackgroundColor(ColorBgDarker)
+	form.SetFieldBackgroundColor(ColorBgAlt)
 	form.SetFieldTextColor(ColorText)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
 	form.SetButtonTextColor(ColorMenuHlText)
@@ -299,7 +299,7 @@ func ReplaceDialog(app *tview.Application, onFind func(DialogResult), onReplace 
 
 	form := tview.NewForm()
 	form.SetBackgroundColor(ColorDialogBg)
-	form.SetFieldBackgroundColor(ColorBgDarker)
+	form.SetFieldBackgroundColor(ColorBgAlt)
 	form.SetFieldTextColor(ColorText)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
 	form.SetButtonTextColor(ColorMenuHlText)
@@ -350,7 +350,7 @@ func ReplaceDialog(app *tview.Application, onFind func(DialogResult), onReplace 
 func GoToLineDialog(app *tview.Application, onResult func(DialogResult)) tview.Primitive {
 	form := tview.NewForm()
 	form.SetBackgroundColor(ColorDialogBg)
-	form.SetFieldBackgroundColor(ColorBgDarker)
+	form.SetFieldBackgroundColor(ColorBgAlt)
 	form.SetFieldTextColor(ColorText)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
 	form.SetButtonTextColor(ColorMenuHlText)
@@ -505,7 +505,7 @@ func MessageDialog(app *tview.Application, title, body string, onClose func()) t
 func GoToAddressDialog(app *tview.Application, onResult func(DialogResult)) tview.Primitive {
 	form := tview.NewForm()
 	form.SetBackgroundColor(ColorDialogBg)
-	form.SetFieldBackgroundColor(ColorBgDarker)
+	form.SetFieldBackgroundColor(ColorBgAlt)
 	form.SetFieldTextColor(ColorText)
 	form.SetButtonBackgroundColor(ColorMenuHighlight)
 	form.SetButtonTextColor(ColorMenuHlText)

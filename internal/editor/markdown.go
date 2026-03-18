@@ -44,9 +44,9 @@ func ParseMarkdownLine(line string, hideMarkers bool, baseStyle tcell.Style, lin
 	isTopOfFile := len(lineIdx) > 0 && lineIdx[0] == 0
 	if isHorizontalRule(trimmed) && !isTopOfFile {
 		if hideMarkers {
-			return []MarkdownSegment{seg("", baseStyle.Foreground(ui.ColorTextGray), 0, len(line))}
+			return []MarkdownSegment{seg("", baseStyle.Foreground(ui.ColorTextMuted), 0, len(line))}
 		}
-		return []MarkdownSegment{seg(line, baseStyle.Foreground(ui.ColorTextGray), 0, len(line))}
+		return []MarkdownSegment{seg(line, baseStyle.Foreground(ui.ColorTextMuted), 0, len(line))}
 	}
 
 	// Check for header: lines starting with # through ######
@@ -374,7 +374,7 @@ func parseStrikethrough(line string, pos int, hideMarkers bool, base tcell.Style
 	end += pos + 2
 	inner := line[pos+2 : end]
 	total := end + 2 - pos
-	style := base.Dim(true).Foreground(ui.ColorTextGray)
+	style := base.Dim(true).Foreground(ui.ColorTextMuted)
 
 	if hideMarkers {
 		return []MarkdownSegment{segHidden(inner, style, pos, pos+total, pos+2)}, total

@@ -161,11 +161,11 @@ func (p *SearchPalette) Draw(screen tcell.Screen) {
 
 	bgStyle := tcell.StyleDefault.Foreground(ColorStatusText).Background(ColorDialogBg)
 	hlStyle := tcell.StyleDefault.Foreground(ColorMenuHlText).Background(ColorMenuHighlight)
-	dimStyle := tcell.StyleDefault.Foreground(ColorTextGray).Background(ColorDialogBg)
-	dimHlStyle := tcell.StyleDefault.Foreground(ColorTextGray).Background(ColorMenuHighlight)
+	dimStyle := tcell.StyleDefault.Foreground(ColorTextMuted).Background(ColorDialogBg)
+	dimHlStyle := tcell.StyleDefault.Foreground(ColorTextMuted).Background(ColorMenuHighlight)
 	borderStyle := tcell.StyleDefault.Foreground(ColorStatusText).Background(ColorDialogBg)
 	lineNumStyle := tcell.StyleDefault.Foreground(ColorMenuHighlight).Background(ColorDialogBg)
-	lineNumHlStyle := tcell.StyleDefault.Foreground(ColorTextWhite).Background(ColorMenuHighlight)
+	lineNumHlStyle := tcell.StyleDefault.Foreground(ColorTextPrimary).Background(ColorMenuHighlight)
 	contentStyle := tcell.StyleDefault.Foreground(ColorStatusText).Background(ColorDialogBg)
 	contentHlStyle := tcell.StyleDefault.Foreground(ColorMenuHlText).Background(ColorMenuHighlight)
 
@@ -204,13 +204,13 @@ func (p *SearchPalette) Draw(screen tcell.Screen) {
 	for i, ch := range displayInput {
 		if inputStart+i < px+paletteW-1 {
 			screen.SetContent(inputStart+i, inputY, ch, nil,
-				tcell.StyleDefault.Foreground(ColorTextWhite).Background(ColorDialogBg))
+				tcell.StyleDefault.Foreground(ColorTextPrimary).Background(ColorDialogBg))
 		}
 	}
 	cursorX := inputStart + len([]rune(displayInput))
 	if cursorX < px+paletteW-1 {
 		screen.SetContent(cursorX, inputY, '_', nil,
-			tcell.StyleDefault.Foreground(ColorTextWhite).Background(ColorDialogBg))
+			tcell.StyleDefault.Foreground(ColorTextPrimary).Background(ColorDialogBg))
 	}
 	// Hint to the right of cursor if input is short
 	if len([]rune(p.input)) < 3 && len([]rune(p.input)) > 0 {

@@ -2677,8 +2677,8 @@ func (a *App) showBookmarksPanel() {
 
 	list := tview.NewList()
 	list.SetBackgroundColor(ui.ColorDialogBg)
-	list.SetMainTextColor(ui.ColorTextWhite)
-	list.SetSecondaryTextColor(ui.ColorTextGray)
+	list.SetMainTextColor(ui.ColorTextPrimary)
+	list.SetSecondaryTextColor(ui.ColorTextMuted)
 	list.SetSelectedTextColor(ui.ColorSelectedText)
 	list.SetSelectedBackgroundColor(ui.ColorSelected)
 	list.ShowSecondaryText(true)
@@ -2851,7 +2851,7 @@ func (a *App) showHelpDialog() {
 	searchInput.SetLabel("Search: ")
 	searchInput.SetBackgroundColor(ui.ColorDialogBg)
 	searchInput.SetFieldBackgroundColor(ui.ColorBg)
-	searchInput.SetFieldTextColor(ui.ColorTextWhite)
+	searchInput.SetFieldTextColor(ui.ColorTextPrimary)
 	searchInput.SetLabelColor(ui.ColorStatusText)
 
 	textView := tview.NewTextView()
@@ -3433,7 +3433,7 @@ func (a *App) showPythonEnvDialog() {
 	list.SetSelectedTextColor(ui.ColorSelectedText)
 	list.SetSelectedBackgroundColor(ui.ColorSelected)
 	list.ShowSecondaryText(true)
-	list.SetSecondaryTextColor(ui.ColorTextGray)
+	list.SetSecondaryTextColor(ui.ColorTextMuted)
 	list.SetBorder(true)
 	list.SetBorderColor(ui.ColorStatusText)
 	list.SetTitle(" Python Environment ")

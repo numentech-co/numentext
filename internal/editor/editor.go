@@ -2621,7 +2621,7 @@ func (e *Editor) Draw(screen tcell.Screen) {
 
 		if lineIdx >= tab.Buffer.LineCount() {
 			// Draw tilde for empty lines
-			screen.SetContent(x+gutterW, y+row, '~', nil, tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorBg))
+			screen.SetContent(x+gutterW, y+row, '~', nil, tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorBg))
 			continue
 		}
 
@@ -2755,8 +2755,8 @@ func (e *Editor) drawScrollbar(screen tcell.Screen, x, y, height int, tab *Tab) 
 		return
 	}
 
-	trackStyle := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorBgDarker)
-	thumbStyle := tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorTextGray)
+	trackStyle := tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorBgAlt)
+	thumbStyle := tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorTextMuted)
 
 	// Calculate thumb position and size
 	thumbSize := height * height / totalLines
@@ -2798,7 +2798,7 @@ func (e *Editor) drawScrollbar(screen tcell.Screen, x, y, height int, tab *Tab) 
 					markerFg = tcell.ColorYellow
 				}
 				screen.SetContent(x, y+markerRow, '\u2588', nil,
-					tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorBgDarker))
+					tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorBgAlt))
 			}
 		}
 		// Build error markers (overwrite LSP markers on same line)
@@ -2815,7 +2815,7 @@ func (e *Editor) drawScrollbar(screen tcell.Screen, x, y, height int, tab *Tab) 
 					markerFg = tcell.ColorYellow
 				}
 				screen.SetContent(x, y+markerRow, '\u2588', nil,
-					tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorBgDarker))
+					tcell.StyleDefault.Foreground(markerFg).Background(ui.ColorBgAlt))
 			}
 		}
 
@@ -2828,7 +2828,7 @@ func (e *Editor) drawScrollbar(screen tcell.Screen, x, y, height int, tab *Tab) 
 						markerRow = height - 1
 					}
 					screen.SetContent(x, y+markerRow, '\u25cf', nil,
-						tcell.StyleDefault.Foreground(tcell.ColorRed).Background(ui.ColorBgDarker))
+						tcell.StyleDefault.Foreground(tcell.ColorRed).Background(ui.ColorBgAlt))
 				}
 			}
 		}
@@ -2842,7 +2842,7 @@ func (e *Editor) drawScrollbar(screen tcell.Screen, x, y, height int, tab *Tab) 
 				markerRow = height - 1
 			}
 			screen.SetContent(x, y+markerRow, '#', nil,
-				tcell.StyleDefault.Foreground(tcell.ColorAqua).Background(ui.ColorBgDarker))
+				tcell.StyleDefault.Foreground(tcell.ColorAqua).Background(ui.ColorBgAlt))
 		}
 	}
 }
@@ -2916,7 +2916,7 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 		for cx := x; cx < x+width; cx++ {
 			screen.SetContent(cx, y+visualRow, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
 		}
-		screen.SetContent(x+gutterW, y+visualRow, '~', nil, tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorBg))
+		screen.SetContent(x+gutterW, y+visualRow, '~', nil, tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorBg))
 		visualRow++
 	}
 
@@ -2976,7 +2976,7 @@ func findSymbol(symbols []BreadcrumbSymbol, line int, path *[]string) {
 
 // drawBreadcrumb draws the breadcrumb bar.
 func (e *Editor) drawBreadcrumb(screen tcell.Screen, x, y, width int) {
-	style := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorBgDarker)
+	style := tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorBgAlt)
 	// Clear breadcrumb bar
 	for cx := x; cx < x+width; cx++ {
 		screen.SetContent(cx, y, ' ', nil, style)
@@ -3010,8 +3010,8 @@ func (e *Editor) drawBreadcrumb(screen tcell.Screen, x, y, width int) {
 	}
 
 	// Render
-	nameStyle := tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBgDarker)
-	sepStyle := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorBgDarker)
+	nameStyle := tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBgAlt)
+	sepStyle := tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorBgAlt)
 
 	cx := x + 1
 	inSep := false
@@ -3309,7 +3309,7 @@ func (e *Editor) drawTabBar(screen tcell.Screen, x, y, width int) {
 		}
 		// Separator
 		if cx < x+availWidth {
-			screen.SetContent(cx, y, ui.Style.TabSeparator(), nil, tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorTabBarBg))
+			screen.SetContent(cx, y, ui.Style.TabSeparator(), nil, tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorTabBarBg))
 			cx++
 		}
 	}
@@ -3747,7 +3747,7 @@ func (e *Editor) drawWelcome(screen tcell.Screen, x, y, width, height int) {
 		for j, ch := range line {
 			cx := startX + j
 			if cx >= x && cx < x+width {
-				screen.SetContent(cx, row, ch, nil, tcell.StyleDefault.Foreground(ui.ColorTextWhite).Background(ui.ColorBg))
+				screen.SetContent(cx, row, ch, nil, tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg))
 			}
 		}
 	}

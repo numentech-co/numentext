@@ -173,7 +173,7 @@ func (p *Panel) Draw(screen tcell.Screen) {
 	if p.term == nil {
 		// Draw empty panel with message
 		msg := "Press Ctrl+` to open terminal"
-		style := tcell.StyleDefault.Foreground(ui.ColorTextGray).Background(ui.ColorOutputBg)
+		style := tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorOutputBg)
 		for i, ch := range msg {
 			if x+i < x+width {
 				screen.SetContent(x+i, y, ch, nil, style)
@@ -247,16 +247,16 @@ func (p *Panel) Draw(screen tcell.Screen) {
 // rather than tracked Output lines. This correctly handles TUI programs (like
 // Claude Code) that use cursor positioning to render their display.
 func (p *Panel) drawBoxed(screen tcell.Screen, x, y, width, height int, vt *VT, bt *BlockTracker) {
-	bgStyle := tcell.StyleDefault.Background(ui.ColorOutputBg).Foreground(ui.ColorTextWhite)
+	bgStyle := tcell.StyleDefault.Background(ui.ColorOutputBg).Foreground(ui.ColorTextPrimary)
 	selectedHeaderStyle := tcell.StyleDefault.Background(ui.ColorPanelFocused).Foreground(tcell.ColorBlack).Bold(true)
-	collapsedHint := tcell.StyleDefault.Background(ui.ColorOutputBg).Foreground(ui.ColorTextGray)
+	collapsedHint := tcell.StyleDefault.Background(ui.ColorOutputBg).Foreground(ui.ColorTextMuted)
 
 	// Alternating styles: even blocks and odd blocks get different backgrounds
 	// Both header and output use the same bg per block
-	headerStyleEven := tcell.StyleDefault.Background(ui.ColorBgDarker).Foreground(tcell.ColorWhite).Bold(true)
-	headerStyleOdd := tcell.StyleDefault.Background(ui.ColorOutputBgAlt).Foreground(tcell.ColorWhite).Bold(true)
-	outputStyleEven := tcell.StyleDefault.Background(ui.ColorOutputBg).Foreground(ui.ColorTextWhite)
-	outputStyleOdd := tcell.StyleDefault.Background(ui.ColorOutputBgAlt).Foreground(ui.ColorTextWhite)
+	headerStyleEven := tcell.StyleDefault.Background(ui.ColorBgAlt).Foreground(tcell.ColorWhite).Bold(true)
+	headerStyleOdd := tcell.StyleDefault.Background(ui.ColorOutputBgStripe).Foreground(tcell.ColorWhite).Bold(true)
+	outputStyleEven := tcell.StyleDefault.Background(ui.ColorOutputBg).Foreground(ui.ColorTextPrimary)
+	outputStyleOdd := tcell.StyleDefault.Background(ui.ColorOutputBgStripe).Foreground(ui.ColorTextPrimary)
 
 	// Check for active (unfinished, expanded) block — it renders VT cells
 	activeBlock := bt.ActiveBlock()
@@ -446,7 +446,7 @@ func (p *Panel) drawBoxed(screen tcell.Screen, x, y, width, height int, vt *VT, 
 			if i%2 == 1 {
 				hStyle = headerStyleOdd
 				outStyle = outputStyleOdd
-				cHint = tcell.StyleDefault.Background(ui.ColorOutputBgAlt).Foreground(ui.ColorTextGray)
+				cHint = tcell.StyleDefault.Background(ui.ColorOutputBgStripe).Foreground(ui.ColorTextMuted)
 			}
 
 			row += p.drawBlock(screen, x, y+row, width, maxBlockArea-row, renderBlk, i, isSelected, lineSkip,
