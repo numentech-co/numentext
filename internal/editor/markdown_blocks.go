@@ -18,6 +18,7 @@ const (
 	BlockList
 	BlockTable
 	BlockFrontmatter
+	BlockImage
 )
 
 // BlockInfo describes a block-level markdown element spanning multiple lines
@@ -30,6 +31,10 @@ type BlockInfo struct {
 	// Table-specific
 	ColWidths []int // calculated column widths
 	ColAligns []int // alignment per column: -1=left, 0=center, 1=right
+
+	// Image-specific (BlockImage)
+	ImageAlt  string // alt text from ![alt](path)
+	ImagePath string // path from ![alt](path)
 }
 
 // MarkdownBlocks holds cached block detection results for a buffer.
@@ -81,6 +86,17 @@ func DetectBlocks(lines []string) []BlockInfo {
 		}
 	}
 	blocks = append(blocks, detectLists(lines, claimed)...)
+
+	// Rebuild claimed
+	claimed = make(map[int]bool)
+	for _, b := range blocks {
+		for i := b.StartLine; i <= b.EndLine; i++ {
+			claimed[i] = true
+		}
+	}
+
+	// Detect standalone image lines: ![alt](path) on its own line
+	blocks = append(blocks, detectImages(lines, claimed)...)
 
 	return blocks
 }
@@ -577,6 +593,59 @@ func ParseListLine(line string) ListLineInfo {
 	return info
 }
 
+// --- Image line detection ---
+
+// ParseImageLine checks if a line is a standalone image reference: ![alt](path)
+// Returns alt, path, and true if the line matches. The line must contain only
+// the image reference (with optional surrounding whitespace).
+func ParseImageLine(line string) (alt, path string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "![") {
+		return "", "", false
+	}
+	closeBracket := strings.Index(trimmed[2:], "]")
+	if closeBracket < 0 {
+		return "", "", false
+	}
+	closeBracket += 2
+	if closeBracket+1 >= len(trimmed) || trimmed[closeBracket+1] != '(' {
+		return "", "", false
+	}
+	closeParen := strings.Index(trimmed[closeBracket+2:], ")")
+	if closeParen < 0 {
+		return "", "", false
+	}
+	closeParen += closeBracket + 2
+	// The image reference must be the entire content of the line.
+	if closeParen+1 != len(trimmed) {
+		return "", "", false
+	}
+	alt = trimmed[2:closeBracket]
+	path = trimmed[closeBracket+2 : closeParen]
+	return alt, path, true
+}
+
+func detectImages(lines []string, claimed map[int]bool) []BlockInfo {
+	var blocks []BlockInfo
+	for i, line := range lines {
+		if claimed[i] {
+			continue
+		}
+		alt, path, ok := ParseImageLine(line)
+		if !ok {
+			continue
+		}
+		blocks = append(blocks, BlockInfo{
+			Type:      BlockImage,
+			StartLine: i,
+			EndLine:   i,
+			ImageAlt:  alt,
+			ImagePath: path,
+		})
+	}
+	return blocks
+}
+
 // --- Markdown block theme colors ---
 // These are added as package-level variables for easy theming.
 
@@ -602,6 +671,10 @@ var (
 	ColorMarkdownCheckbox = tcell.NewRGBColor(85, 255, 85)
 )
 
+// Color for image placeholder row
+var ColorMarkdownImageBg = tcell.NewRGBColor(30, 30, 60)
+var ColorMarkdownImageFg = tcell.NewRGBColor(170, 170, 255)
+
 // ApplyMarkdownBlockColors sets block-level markdown colors for light or dark themes.
 func ApplyMarkdownBlockColors(light bool) {
 	if light {
@@ -615,6 +688,8 @@ func ApplyMarkdownBlockColors(light bool) {
 		ColorMarkdownFrontmatterVal = tcell.NewRGBColor(160, 80, 0)
 		ColorMarkdownBullet = tcell.NewRGBColor(0, 100, 180)
 		ColorMarkdownCheckbox = tcell.NewRGBColor(0, 140, 0)
+		ColorMarkdownImageBg = tcell.NewRGBColor(235, 235, 245)
+		ColorMarkdownImageFg = tcell.NewRGBColor(80, 80, 160)
 	} else {
 		ColorMarkdownCodeBlockBg = tcell.NewRGBColor(30, 30, 50)
 		ColorMarkdownQuoteBorder = tcell.NewRGBColor(0, 170, 170)
@@ -626,6 +701,8 @@ func ApplyMarkdownBlockColors(light bool) {
 		ColorMarkdownFrontmatterVal = tcell.NewRGBColor(206, 145, 120)
 		ColorMarkdownBullet = tcell.NewRGBColor(0, 170, 170)
 		ColorMarkdownCheckbox = tcell.NewRGBColor(85, 255, 85)
+		ColorMarkdownImageBg = tcell.NewRGBColor(30, 30, 60)
+		ColorMarkdownImageFg = tcell.NewRGBColor(170, 170, 255)
 	}
 }
 
@@ -647,6 +724,8 @@ func MarkdownBlockStyle(block *BlockInfo) tcell.Color {
 		return ColorMarkdownFrontmatterBg
 	case BlockTable:
 		return ColorMarkdownTableBg
+	case BlockImage:
+		return ColorMarkdownImageBg
 	default:
 		return ui.ColorBg
 	}
