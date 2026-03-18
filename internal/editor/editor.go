@@ -61,6 +61,30 @@ type Tab struct {
 	MarkdownMode bool            // true when markdown preview rendering is active
 	mdBlocks     *MarkdownBlocks // cached block detection
 
+	// Unsaved change tracking: snapshot of buffer lines at last save/open
+	SavedSnapshot []string
+}
+
+// snapshotLines copies the current buffer lines for unsaved change tracking.
+func (t *Tab) snapshotLines() {
+	lines := t.Buffer.Lines()
+	t.SavedSnapshot = make([]string, len(lines))
+	copy(t.SavedSnapshot, lines)
+}
+
+// IsLineUnsaved returns true if the given 0-based line index differs from the saved snapshot.
+func (t *Tab) IsLineUnsaved(lineIdx int) bool {
+	if t.SavedSnapshot == nil {
+		return false
+	}
+	if lineIdx >= len(t.SavedSnapshot) {
+		// Line is new (added after save)
+		return true
+	}
+	if lineIdx >= t.Buffer.LineCount() {
+		return false
+	}
+	return t.Buffer.Line(lineIdx) != t.SavedSnapshot[lineIdx]
 }
 
 // MaxBookmarks is the maximum number of bookmarks allowed per tab.
@@ -750,6 +774,7 @@ func (e *Editor) NewTab(name, filePath string, content string) {
 		LineEnding:   defaultLE,
 		MarkdownMode: IsMarkdownFile(filePath),
 	}
+	tab.snapshotLines()
 	e.tabs = append(e.tabs, tab)
 	e.activeTab = len(e.tabs) - 1
 	e.trackTabUsage()
@@ -802,6 +827,8 @@ func (e *Editor) OpenFile(filePath string) error {
 		if isMarkdownFile(filePath) {
 			tab.MarkdownMode = true
 		}
+		// Snapshot buffer for unsaved change markers
+		tab.snapshotLines()
 	}
 
 	if e.onFileOpen != nil && filePath != "" {
@@ -862,6 +889,7 @@ func (e *Editor) SaveCurrentFile() error {
 		return err
 	}
 	tab.Buffer.SetModified(false)
+	tab.snapshotLines()
 	e.notifyChange()
 	return nil
 }
@@ -902,6 +930,7 @@ func (e *Editor) ReloadCurrentFile() error {
 	tab.LineEnding = detectLineEnding(content)
 	tab.Buffer.SetText(content)
 	tab.Buffer.SetModified(false)
+	tab.snapshotLines()
 	e.hlVersion++
 	e.notifyChange()
 	return nil
@@ -3108,6 +3137,18 @@ func (e *Editor) drawGutterForLine(screen tcell.Screen, x, y, gutterW, lineIdx i
 	if tab.Bookmarks[lineIdx] {
 		screen.SetContent(x, y, '#', nil,
 			tcell.StyleDefault.Foreground(tcell.ColorAqua).Background(ui.ColorGutterBg).Bold(true))
+		for i, ch := range gutterStr {
+			if i > 0 && x+i < x+gutterW {
+				screen.SetContent(x+i, y, ch, nil, gutterStyle)
+			}
+		}
+		return
+	}
+
+	// Check for unsaved change marker (takes precedence over git diff)
+	if tab.IsLineUnsaved(lineIdx) {
+		screen.SetContent(x, y, '|', nil,
+			tcell.StyleDefault.Foreground(ui.ColorUnsavedMarker).Background(ui.ColorGutterBg))
 		for i, ch := range gutterStr {
 			if i > 0 && x+i < x+gutterW {
 				screen.SetContent(x+i, y, ch, nil, gutterStyle)

@@ -20,7 +20,8 @@ var (
 	ColorTextMuted   = tcell.NewRGBColor(170, 170, 170) // Gray
 	ColorMenuText   = tcell.NewRGBColor(255, 255, 255) // White
 	ColorStatusText = tcell.NewRGBColor(0, 0, 0)       // Black
-	ColorGutterText = tcell.NewRGBColor(170, 170, 170) // Gray
+	ColorGutterText       = tcell.NewRGBColor(170, 170, 170) // Gray
+	ColorUnsavedMarker    = tcell.NewRGBColor(255, 170, 0)  // Orange for unsaved line markers
 
 	// Syntax highlighting
 	ColorKeyword = tcell.NewRGBColor(255, 255, 255) // White (bold)

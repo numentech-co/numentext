@@ -50,6 +50,9 @@ type App struct {
 	// Panel focus tracking
 	focusedPanel string // "filetree", "editor", "output", "terminal"
 
+	// Output panel toggle state
+	outputHidden bool // true when user has manually hidden the output panel
+
 	// LSP
 	lspManager *lsp.Manager
 
@@ -187,9 +190,9 @@ func (a *App) setupUI() {
 
 	// Auto-show/hide output panel based on content
 	a.output.SetOnChange(func(hasContent bool) {
-		if hasContent {
+		if hasContent && !a.outputHidden {
 			a.layout.SetOutputVisible(true, a.config.OutputHeight)
-		} else if !a.termVisible {
+		} else if !hasContent && !a.termVisible {
 			a.layout.SetOutputVisible(false, 0)
 		}
 	})
@@ -281,6 +284,8 @@ func (a *App) setupMenus() {
 				a.editor.ToggleMarkdownMode()
 				a.statusBar.SetMarkdownMode(a.editor.IsMarkdownMode())
 			}},
+			{Label: "---"},
+			{Label: "Toggle Output", Shortcut: "Ctrl+Shift+O", Accel: 'o', Action: a.toggleOutput},
 		},
 	}
 
@@ -637,7 +642,11 @@ func (a *App) setupKeybindings() {
 				a.newFile()
 				return nil
 			case 'o':
-				a.openFile()
+				if shift {
+					a.toggleOutput()
+				} else {
+					a.openFile()
+				}
 				return nil
 			case 'q':
 				a.quit()
@@ -1997,6 +2006,7 @@ func (a *App) runFile() {
 				a.output.AppendError(fmt.Sprintf("\nProcess exited with code %d (%.2fs)", result.ExitCode, result.Duration.Seconds()))
 				a.handleBuildErrors(result)
 			}
+			a.forceShowOutput()
 		})
 	}()
 }
@@ -2042,6 +2052,7 @@ func (a *App) buildFile() {
 			} else {
 				a.handleBuildErrors(result)
 			}
+			a.forceShowOutput()
 		})
 	}()
 }
@@ -2439,6 +2450,7 @@ func (a *App) showShortcuts() {
  Ctrl+Shift+Down     Shrink bottom panel
 
  [white::b]Tools[-::-]
+ Ctrl+Shift+O        Toggle output panel
  Ctrl+Shift+I        Format file
  Ctrl+Shift+L        Lint file
 
@@ -2818,6 +2830,7 @@ func (a *App) showHelpDialog() {
 		}},
 		{"Tools", []shortcutEntry{
 			{"Ctrl+`", "Toggle terminal"},
+			{"Ctrl+Shift+O", "Toggle output panel"},
 			{"Ctrl+Shift+I", "Format file"},
 			{"Ctrl+Shift+L", "Lint file"},
 			{"Ctrl+Shift+T", "New terminal session"},
@@ -3032,6 +3045,23 @@ func (a *App) restartLSP() {
 		return
 	}
 	go a.lspManager.RestartForFile(tab.FilePath)
+}
+
+func (a *App) toggleOutput() {
+	if a.layout.OutputVisible() {
+		a.outputHidden = true
+		a.layout.SetOutputVisible(false, 0)
+	} else {
+		a.outputHidden = false
+		a.layout.SetOutputVisible(true, a.config.OutputHeight)
+	}
+}
+
+// forceShowOutput makes the output panel visible, clearing the user-hidden flag.
+// Used when build/run produces errors that the user must see.
+func (a *App) forceShowOutput() {
+	a.outputHidden = false
+	a.layout.SetOutputVisible(true, a.config.OutputHeight)
 }
 
 func (a *App) toggleTerminal() {
