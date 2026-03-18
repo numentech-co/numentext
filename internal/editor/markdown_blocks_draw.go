@@ -1,10 +1,12 @@
 package editor
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
 
+	"numentext/internal/graphics"
 	"numentext/internal/ui"
 )
 
@@ -51,6 +53,8 @@ func (e *Editor) drawMarkdownBlockLine(screen tcell.Screen, editorX, screenY, ma
 		return e.drawTableLine(screen, editorX, screenY, maxWidth, lineIdx, tab, block, cursorInBlock)
 	case BlockFrontmatter:
 		return e.drawFrontmatterLine(screen, editorX, screenY, maxWidth, lineIdx, tab, block, cursorInBlock)
+	case BlockImage:
+		return e.drawImageLine(screen, editorX, screenY, maxWidth, lineIdx, tab, block, cursorInBlock)
 	}
 	return false
 }
@@ -369,5 +373,56 @@ func (e *Editor) drawFrontmatterLine(screen tcell.Screen, editorX, screenY, maxW
 		screen.SetContent(sx, screenY, ch, nil, textStyle)
 		sx++
 	}
+	return true
+}
+
+// --- Image placeholder rendering ---
+
+func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth int, lineIdx int, tab *Tab, block *BlockInfo, cursorInBlock bool) bool {
+	cursorOnLine := tab.CursorRow == lineIdx
+
+	if cursorOnLine {
+		// Show raw ![alt](path) syntax for editing
+		return false
+	}
+
+	// Try to load the image to get dimensions for the placeholder.
+	var imgWidth, imgHeight int
+	basePath := ""
+	if tab.FilePath != "" {
+		basePath = filepath.Dir(tab.FilePath)
+	}
+
+	if basePath != "" && block.ImagePath != "" {
+		// Attempt to load image (cached) to get dimensions.
+		ci, err := e.imageCache.Load(block.ImagePath, basePath, maxWidth*8, e.graphicsCap)
+		if err == nil {
+			imgWidth = ci.OrigWidth
+			imgHeight = ci.OrigHeight
+		}
+	}
+
+	// Render the placeholder row.
+	placeholder := graphics.FormatPlaceholder(block.ImageAlt, block.ImagePath, imgWidth, imgHeight)
+
+	bg := ColorMarkdownImageBg
+	fg := ColorMarkdownImageFg
+	style := tcell.StyleDefault.Foreground(fg).Background(bg)
+
+	// Fill the full width with background.
+	for cx := editorX; cx < editorX+maxWidth; cx++ {
+		screen.SetContent(cx, screenY, ' ', nil, style)
+	}
+
+	// Draw the placeholder text.
+	sx := editorX + 1 // slight indent
+	for _, ch := range placeholder {
+		if sx >= editorX+maxWidth-1 {
+			break
+		}
+		screen.SetContent(sx, screenY, ch, nil, style)
+		sx++
+	}
+
 	return true
 }

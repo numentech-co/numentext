@@ -433,3 +433,155 @@ func findSubstr(s, sub string) bool {
 	}
 	return false
 }
+
+// --- Image line tests ---
+
+func TestParseImageLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		line    string
+		wantAlt string
+		wantPath string
+		wantOk  bool
+	}{
+		{
+			name:     "basic image",
+			line:     "![screenshot](images/screen.png)",
+			wantAlt:  "screenshot",
+			wantPath: "images/screen.png",
+			wantOk:   true,
+		},
+		{
+			name:     "image with whitespace",
+			line:     "  ![logo](assets/logo.jpg)  ",
+			wantAlt:  "logo",
+			wantPath: "assets/logo.jpg",
+			wantOk:   true,
+		},
+		{
+			name:     "empty alt text",
+			line:     "![](photo.png)",
+			wantAlt:  "",
+			wantPath: "photo.png",
+			wantOk:   true,
+		},
+		{
+			name:     "not an image - regular link",
+			line:     "[click here](url)",
+			wantOk:   false,
+		},
+		{
+			name:     "not standalone - text before",
+			line:     "see ![img](x.png) here",
+			wantOk:   false,
+		},
+		{
+			name:     "not standalone - text after",
+			line:     "![img](x.png) caption",
+			wantOk:   false,
+		},
+		{
+			name:     "missing close paren",
+			line:     "![alt](path",
+			wantOk:   false,
+		},
+		{
+			name:     "missing open paren",
+			line:     "![alt]path)",
+			wantOk:   false,
+		},
+		{
+			name:     "no bracket",
+			line:     "!alt(path)",
+			wantOk:   false,
+		},
+		{
+			name:     "plain text",
+			line:     "hello world",
+			wantOk:   false,
+		},
+		{
+			name:     "absolute path",
+			line:     "![diagram](/home/user/doc/fig1.png)",
+			wantAlt:  "diagram",
+			wantPath: "/home/user/doc/fig1.png",
+			wantOk:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			alt, path, ok := ParseImageLine(tt.line)
+			if ok != tt.wantOk {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOk)
+			}
+			if !ok {
+				return
+			}
+			if alt != tt.wantAlt {
+				t.Errorf("alt = %q, want %q", alt, tt.wantAlt)
+			}
+			if path != tt.wantPath {
+				t.Errorf("path = %q, want %q", path, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestDetectBlocks_Images(t *testing.T) {
+	lines := []string{
+		"# Title",
+		"",
+		"![screenshot](images/screen.png)",
+		"",
+		"Some text here.",
+		"",
+		"![logo](assets/logo.jpg)",
+	}
+
+	blocks := DetectBlocks(lines)
+	var imageBlocks []BlockInfo
+	for _, b := range blocks {
+		if b.Type == BlockImage {
+			imageBlocks = append(imageBlocks, b)
+		}
+	}
+
+	if len(imageBlocks) != 2 {
+		t.Fatalf("expected 2 image blocks, got %d", len(imageBlocks))
+	}
+
+	if imageBlocks[0].StartLine != 2 || imageBlocks[0].EndLine != 2 {
+		t.Errorf("first image block: start=%d end=%d, want 2,2",
+			imageBlocks[0].StartLine, imageBlocks[0].EndLine)
+	}
+	if imageBlocks[0].ImageAlt != "screenshot" {
+		t.Errorf("first image alt = %q, want 'screenshot'", imageBlocks[0].ImageAlt)
+	}
+	if imageBlocks[0].ImagePath != "images/screen.png" {
+		t.Errorf("first image path = %q, want 'images/screen.png'", imageBlocks[0].ImagePath)
+	}
+
+	if imageBlocks[1].StartLine != 6 || imageBlocks[1].EndLine != 6 {
+		t.Errorf("second image block: start=%d end=%d, want 6,6",
+			imageBlocks[1].StartLine, imageBlocks[1].EndLine)
+	}
+	if imageBlocks[1].ImageAlt != "logo" {
+		t.Errorf("second image alt = %q, want 'logo'", imageBlocks[1].ImageAlt)
+	}
+}
+
+func TestDetectBlocks_ImageNotInCodeBlock(t *testing.T) {
+	lines := []string{
+		"```markdown",
+		"![this is inside code](not-an-image.png)",
+		"```",
+	}
+
+	blocks := DetectBlocks(lines)
+	for _, b := range blocks {
+		if b.Type == BlockImage {
+			t.Error("image block should not be detected inside fenced code block")
+		}
+	}
+}

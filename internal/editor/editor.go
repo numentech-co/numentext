@@ -15,6 +15,7 @@ import (
 	"github.com/rivo/tview"
 
 	"numentext/internal/editor/keymode"
+	"numentext/internal/graphics"
 	"numentext/internal/ui"
 )
 
@@ -175,6 +176,10 @@ type Editor struct {
 	mouseDragging  bool
 	mouseAnchorRow int
 	mouseAnchorCol int
+	// Inline image support for markdown preview
+	imageCache  *graphics.ImageCache
+	graphicsCap graphics.GraphicsCapability
+
 }
 
 // BreadcrumbSymbol represents a symbol for breadcrumb display.
@@ -202,6 +207,8 @@ func NewEditor() *Editor {
 		diagnostics:     make(map[string]map[int]DiagnosticInfo),
 		buildDiags:      make(map[string]map[int]DiagnosticInfo),
 		keyMode:         keymode.NewDefaultMode(),
+		imageCache:      graphics.NewImageCache(),
+		graphicsCap:     graphics.DetectCapability(),
 	}
 	e.SetBorder(false)
 	e.SetBackgroundColor(ui.ColorBg)
