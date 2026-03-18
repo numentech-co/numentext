@@ -36,6 +36,9 @@ func (h *mockHost) ActiveFileContent() string      { return "package main\n" }
 func (h *mockHost) CursorPosition() (int, int)     { return h.cursorRow, h.cursorCol }
 func (h *mockHost) SetCursor(row, col int)         { h.cursorRow = row; h.cursorCol = col }
 func (h *mockHost) InsertText(text string)         { h.insertedText = text }
+func (h *mockHost) SelectedText() string           { return "" }
+func (h *mockHost) ReplaceSelection(text string)   { h.insertedText = text }
+func (h *mockHost) SetContent(text string)         {}
 func (h *mockHost) SetStatusMessage(msg string)    { h.statusMsg = msg }
 func (h *mockHost) AppendOutput(text string)       { h.outputBuf += text }
 func (h *mockHost) ShowPanel(name string)          { h.shownPanels[name] = true }

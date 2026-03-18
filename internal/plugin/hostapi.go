@@ -13,6 +13,9 @@ type PluginHost interface {
 	CursorPosition() (int, int)
 	SetCursor(row, col int)
 	InsertText(text string)
+	SelectedText() string
+	ReplaceSelection(text string)
+	SetContent(text string)
 	SetStatusMessage(msg string)
 	AppendOutput(text string)
 	AddMenuItem(menuName, label string, action func())
@@ -90,6 +93,26 @@ func registerHostAPI(lr *LuaRuntime, host PluginHost, pluginName string, registr
 	numen.RawSetString("insert_text", L.NewFunction(func(L *lua.LState) int {
 		text := L.CheckString(1)
 		host.InsertText(text)
+		return 0
+	}))
+
+	// numen.selected_text() -> text
+	numen.RawSetString("selected_text", L.NewFunction(func(L *lua.LState) int {
+		L.Push(lua.LString(host.SelectedText()))
+		return 1
+	}))
+
+	// numen.replace_selection(text) -- replaces selected text, or inserts at cursor if no selection
+	numen.RawSetString("replace_selection", L.NewFunction(func(L *lua.LState) int {
+		text := L.CheckString(1)
+		host.ReplaceSelection(text)
+		return 0
+	}))
+
+	// numen.set_content(text) -- replaces the entire buffer content
+	numen.RawSetString("set_content", L.NewFunction(func(L *lua.LState) int {
+		text := L.CheckString(1)
+		host.SetContent(text)
 		return 0
 	}))
 

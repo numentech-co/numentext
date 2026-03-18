@@ -1511,6 +1511,15 @@ func (e *Editor) selectedText(tab *Tab) string {
 	return sb.String()
 }
 
+// SelectedText returns the currently selected text in the active tab.
+func (e *Editor) SelectedText() string {
+	tab := e.ActiveTab()
+	if tab == nil {
+		return ""
+	}
+	return e.selectedText(tab)
+}
+
 func (e *Editor) deleteSelection(tab *Tab) {
 	if !tab.HasSelect {
 		return

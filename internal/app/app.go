@@ -3616,6 +3616,31 @@ func (a *App) ActiveFileContent() string           { return a.PluginActiveFileCo
 func (a *App) CursorPosition() (int, int)          { return a.PluginCursorPosition() }
 func (a *App) SetCursor(row, col int)              { a.PluginSetCursor(row, col) }
 func (a *App) InsertText(text string)              { a.PluginInsertText(text) }
+func (a *App) SelectedText() string {
+	tab := a.editor.ActiveTab()
+	if tab == nil || !tab.HasSelect {
+		return ""
+	}
+	return a.editor.SelectedText()
+}
+func (a *App) ReplaceSelection(text string) {
+	tab := a.editor.ActiveTab()
+	if tab == nil {
+		return
+	}
+	if tab.HasSelect {
+		a.editor.HandleAction(editor.ActionCut, 0)
+	}
+	a.editor.InsertAtCursor(text)
+}
+func (a *App) SetContent(text string) {
+	tab := a.editor.ActiveTab()
+	if tab == nil {
+		return
+	}
+	tab.Buffer.SetText(text)
+	tab.Buffer.SetModified(true)
+}
 func (a *App) SetStatusMessage(msg string)         { a.PluginSetStatusMessage(msg) }
 func (a *App) AppendOutput(text string)            { a.PluginAppendOutput(text) }
 func (a *App) AddMenuItem(menuName, label string, action func()) {
