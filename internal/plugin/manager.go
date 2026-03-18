@@ -145,6 +145,8 @@ func (m *Manager) LoadPlugin(dir string) error {
 	}
 
 	lr := NewLuaRuntime()
+	// Set package.path so require() finds modules in the plugin's directory
+	lr.SetPackagePath(dir)
 	registerHostAPI(lr, m.host, manifest.Name, m.registry, m.events)
 
 	if err := lr.DoFile(initPath); err != nil {

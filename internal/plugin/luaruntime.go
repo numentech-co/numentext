@@ -45,6 +45,16 @@ func NewLuaRuntime() *LuaRuntime {
 	}
 }
 
+// SetPackagePath adds a directory to the Lua package.path so require() can find modules there.
+func (lr *LuaRuntime) SetPackagePath(dir string) {
+	pkg := lr.state.GetGlobal("package")
+	if tbl, ok := pkg.(*lua.LTable); ok {
+		currentPath := lua.LVAsString(tbl.RawGetString("path"))
+		newPath := dir + "/?.lua;" + dir + "/?/init.lua;" + currentPath
+		tbl.RawSetString("path", lua.LString(newPath))
+	}
+}
+
 // Close shuts down the Lua VM.
 func (lr *LuaRuntime) Close() {
 	lr.mu.Lock()
