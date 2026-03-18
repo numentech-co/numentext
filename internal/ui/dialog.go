@@ -124,7 +124,7 @@ func OpenFileDialog(app *tview.Application, startDir string, onResult func(Dialo
 	pathInput.SetBackgroundColor(ColorDialogBg)
 	pathInput.SetFieldBackgroundColor(ColorBgDarker)
 	pathInput.SetFieldTextColor(ColorText)
-	pathInput.SetLabelColor(ColorText)
+	pathInput.SetLabelStyle(tcell.StyleDefault.Foreground(ColorText).Background(ColorDialogBg))
 
 	var populateFiles func(dir string)
 	populateFiles = func(dir string) {
