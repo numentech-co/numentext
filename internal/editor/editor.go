@@ -127,6 +127,7 @@ type Editor struct {
 	tabOverflow       bool   // true when tabs don't fit in the tab bar
 	tabOverflowX      int    // screen X position of the overflow indicator
 	tabOverflowY      int    // screen Y position of the overflow indicator
+	tabOverflowW      int    // width of the overflow indicator
 	tabSwitcherOpen   bool   // true when the tab switcher dropdown is showing
 	tabSwitcherItems  []int  // indices into e.tabs, sorted by MRU
 	tabSwitcherSel    int    // selected item index in the dropdown
@@ -3259,20 +3260,29 @@ func (e *Editor) drawTabBar(screen tcell.Screen, x, y, width int) {
 	}
 
 	// Calculate total width needed for all tabs
-	overflowIndicator := " + "
-	overflowWidth := len(overflowIndicator)
 	totalNeeded := 1 // starting offset
 	for _, tab := range e.tabs {
 		totalNeeded += len([]rune(e.tabLabel(tab))) + 1 // +1 for separator
 	}
 
 	e.tabOverflow = totalNeeded > width && len(e.tabs) > 1
+
+	// Count how many tabs will be hidden
+	overflowIndicator := ""
+	overflowWidth := 0
+	if e.tabOverflow {
+		// Will be recalculated after we know how many fit
+		overflowIndicator = " ... "
+		overflowWidth = len(overflowIndicator)
+	}
+
 	availWidth := width
 	if e.tabOverflow {
 		availWidth = width - overflowWidth
 	}
 
 	cx := x + 1
+	visibleCount := 0
 	for i, tab := range e.tabs {
 		fg := ui.ColorTabInactive
 		bg := ui.ColorTabBarBg
@@ -3289,6 +3299,7 @@ func (e *Editor) drawTabBar(screen tcell.Screen, x, y, width int) {
 			// Don't draw remaining tabs - they overflow
 			break
 		}
+		visibleCount++
 
 		for _, ch := range labelRunes {
 			if cx < x+availWidth {
@@ -3303,12 +3314,16 @@ func (e *Editor) drawTabBar(screen tcell.Screen, x, y, width int) {
 		}
 	}
 
-	// Draw overflow indicator
+	// Draw overflow indicator with hidden tab count
 	if e.tabOverflow {
+		hiddenCount := len(e.tabs) - visibleCount
+		overflowIndicator = fmt.Sprintf(" +%d ", hiddenCount)
+		overflowWidth = len(overflowIndicator)
 		overflowX := x + width - overflowWidth
 		e.tabOverflowX = overflowX
 		e.tabOverflowY = y
-		style := tcell.StyleDefault.Foreground(ui.ColorAccel).Background(ui.ColorTabBarBg).Bold(true)
+		e.tabOverflowW = overflowWidth
+		style := tcell.StyleDefault.Foreground(ui.ColorMenuHlText).Background(ui.ColorMenuHighlight).Bold(true)
 		for i, ch := range overflowIndicator {
 			screen.SetContent(overflowX+i, y, ch, nil, style)
 		}
@@ -4147,7 +4162,7 @@ func (e *Editor) handleTabBarClick(relX int, tab *Tab) {
 	// Check if clicking the overflow indicator
 	if e.tabOverflow {
 		overflowRelX := e.tabOverflowX - bx
-		if relX >= overflowRelX && relX < overflowRelX+3 {
+		if relX >= overflowRelX && relX < overflowRelX+e.tabOverflowW {
 			if e.tabSwitcherOpen {
 				e.CloseTabSwitcher()
 			} else {
