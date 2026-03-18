@@ -15,6 +15,7 @@ import (
 
 	"numentext/internal/config"
 	"numentext/internal/dap"
+	"numentext/internal/diffview"
 	"numentext/internal/editor"
 	"numentext/internal/editor/keymode"
 	"numentext/internal/filetree"
@@ -79,6 +80,10 @@ type App struct {
 	// Hex view
 	hexView     *hexview.HexView // active hex view (nil when in text editor mode)
 	hexViewMode bool             // true when hex view is displayed instead of editor
+
+	// Diff view
+	diffView     *diffview.DiffView // active diff view (nil when not in diff mode)
+	diffViewMode bool               // true when diff view is displayed instead of editor
 
 	// Plugin system
 	pluginManager *plugin.Manager
@@ -281,6 +286,8 @@ func (a *App) setupMenus() {
 				a.editor.ToggleMarkdownMode()
 				a.statusBar.SetMarkdownMode(a.editor.IsMarkdownMode())
 			}},
+			{Label: "---"},
+			{Label: "Git Diff", Accel: 'g', Action: a.showGitDiff},
 		},
 	}
 
@@ -717,7 +724,9 @@ func (a *App) setupKeybindings() {
 			}
 			if a.menuBar.IsOpen() {
 				a.menuBar.Close()
-				if a.hexViewMode {
+				if a.diffViewMode {
+					a.tviewApp.SetFocus(a.diffView)
+				} else if a.hexViewMode {
 					a.tviewApp.SetFocus(a.hexView)
 				} else {
 					a.focusPanel("editor")
@@ -727,6 +736,11 @@ func (a *App) setupKeybindings() {
 			if hasDialog {
 				// Let the dialog handle Escape
 				return event
+			}
+			// Close diff view if active
+			if a.diffViewMode {
+				a.hideDiffView()
+				return nil
 			}
 			// Return focus to editor/hex view from file tree/output/terminal
 			if a.hexViewMode {
@@ -1276,6 +1290,77 @@ func (a *App) saveHexView() {
 	} else {
 		a.statusBar.SetMessage("Hex file saved")
 	}
+}
+
+// showGitDiff opens the side-by-side diff view for the current file.
+func (a *App) showGitDiff() {
+	if a.diffViewMode {
+		a.statusBar.SetMessage("Already in diff view")
+		return
+	}
+	if a.hexViewMode {
+		a.statusBar.SetMessage("Cannot diff in hex view mode")
+		return
+	}
+
+	tab := a.editor.ActiveTab()
+	if tab == nil || tab.FilePath == "" {
+		a.statusBar.SetMessage("No file open")
+		return
+	}
+
+	dv, err := diffview.New(tab.FilePath)
+	if err != nil {
+		a.output.AppendError("Git diff: " + err.Error())
+		a.statusBar.SetMessage("Git diff failed")
+		return
+	}
+
+	a.showDiffView(dv)
+}
+
+// showDiffView switches the editor area to show a diff view.
+func (a *App) showDiffView(dv *diffview.DiffView) {
+	dv.SetOnClose(func() {
+		a.hideDiffView()
+	})
+
+	a.diffView = dv
+	a.diffViewMode = true
+
+	// Replace the editor in the layout with the diff view
+	a.layout.Editor = dv
+	a.layout.RebuildMainFlex()
+	a.tviewApp.SetFocus(dv)
+	a.statusBar.SetMessage("Diff view: " + filepath.Base(dv.FilePath()) + " -- Escape to close, Tab to switch panes")
+	a.statusBar.SetFocusedPanel("Diff View")
+}
+
+// hideDiffView switches back from diff view to the text editor.
+func (a *App) hideDiffView() {
+	if !a.diffViewMode {
+		return
+	}
+	a.diffViewMode = false
+	a.diffView = nil
+
+	// Restore the editor in the layout
+	a.layout.Editor = a.editor
+	a.layout.RebuildMainFlex()
+	a.tviewApp.SetFocus(a.editor)
+	a.updateStatusBar()
+	a.statusBar.SetFocusedPanel("Editor")
+}
+
+// ShowDiffForFile opens the diff view for a specific file path.
+// This can be called by plugins via the host API.
+func (a *App) ShowDiffForFile(filePath string) {
+	dv, err := diffview.New(filePath)
+	if err != nil {
+		a.output.AppendError("Git diff: " + err.Error())
+		return
+	}
+	a.showDiffView(dv)
 }
 
 // OpenMergeFiles is a stub -- merge view has been moved to the numentext-git plugin.
