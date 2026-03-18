@@ -24,6 +24,7 @@ const (
 	LineEndingCRLF = "\r\n"
 	LineEndingCR   = "\r"
 )
+
 // BlockSelection represents a rectangular/column selection
 type BlockSelection struct {
 	Active    bool
@@ -32,7 +33,6 @@ type BlockSelection struct {
 	CursorRow int
 	CursorCol int
 }
-
 
 // Tab represents an open file tab
 type Tab struct {
@@ -47,15 +47,15 @@ type Tab struct {
 	SelectStart [2]int // row, col (-1 = no selection)
 	SelectEnd   [2]int
 	HasSelect   bool
-	LineEnding  string // "\n", "\r\n", or "\r"
-	HasBOM      bool   // true if file had UTF-8 BOM
+	LineEnding  string       // "\n", "\r\n", or "\r"
+	HasBOM      bool         // true if file had UTF-8 BOM
 	Bookmarks   map[int]bool // set of bookmarked line indices (0-based)
 
 	// Git diff markers: 0-based line number -> change type
-	DiffMarkers   map[int]DiffChangeType
-	DiffAllAdded  bool // true if file is untracked (all lines are added)
+	DiffMarkers  map[int]DiffChangeType
+	DiffAllAdded bool // true if file is untracked (all lines are added)
 
-	BlockSel    BlockSelection
+	BlockSel BlockSelection
 
 	// Markdown live preview mode
 	MarkdownMode bool            // true when markdown preview rendering is active
@@ -93,17 +93,17 @@ const MaxBookmarks = 50
 // Editor is the core editor component
 type Editor struct {
 	*tview.Box
-	tabs        []*Tab
-	activeTab   int
-	onChange    func()
-	onTabChange func()
-	hasFocus       bool
+	tabs            []*Tab
+	activeTab       int
+	onChange        func()
+	onTabChange     func()
+	hasFocus        bool
 	showLineNumbers bool
 	wordWrap        bool
 	tabSize         int
-	cachedHL       []HighlightedLine
-	cachedHLVer    int
-	hlVersion      int
+	cachedHL        []HighlightedLine
+	cachedHLVer     int
+	hlVersion       int
 
 	// LSP callbacks
 	onFileOpen   func(filePath, text string)
@@ -111,8 +111,8 @@ type Editor struct {
 	onFileClose  func(filePath string)
 
 	// Completion
-	completion         *CompletionPopup
-	onRequestComplete  func(filePath string, row, col int, callback func([]CompletionItem))
+	completion        *CompletionPopup
+	onRequestComplete func(filePath string, row, col int, callback func([]CompletionItem))
 
 	// Diagnostics: filePath -> line -> severity (1=error, 2=warning, 3=info, 4=hint)
 	diagnostics map[string]map[int]DiagnosticInfo
@@ -148,29 +148,33 @@ type Editor struct {
 	breadcrumbFile    string // file path for cached symbols
 
 	// Tab overflow / switcher
-	tabOverflow       bool   // true when tabs don't fit in the tab bar
-	tabOverflowX      int    // screen X position of the overflow indicator
-	tabOverflowY      int    // screen Y position of the overflow indicator
-	tabOverflowW      int    // width of the overflow indicator
-	tabSwitcherOpen   bool   // true when the tab switcher dropdown is showing
-	tabSwitcherItems  []int  // indices into e.tabs, sorted by MRU
-	tabSwitcherSel    int    // selected item index in the dropdown
-	tabSwitcherX      int    // screen X of the dropdown
-	tabSwitcherY      int    // screen Y of the dropdown
-	tabSwitcherW      int    // width of the dropdown
-	tabLastUsed       []int  // tab indices in MRU order
+	tabOverflow      bool  // true when tabs don't fit in the tab bar
+	tabOverflowX     int   // screen X position of the overflow indicator
+	tabOverflowY     int   // screen Y position of the overflow indicator
+	tabOverflowW     int   // width of the overflow indicator
+	tabSwitcherOpen  bool  // true when the tab switcher dropdown is showing
+	tabSwitcherItems []int // indices into e.tabs, sorted by MRU
+	tabSwitcherSel   int   // selected item index in the dropdown
+	tabSwitcherX     int   // screen X of the dropdown
+	tabSwitcherY     int   // screen Y of the dropdown
+	tabSwitcherW     int   // width of the dropdown
+	tabLastUsed      []int // tab indices in MRU order
 
 	// Callback for showing tab switcher (needs app-level dialog)
 	onShowTabSwitcher func()
 	// Click tracking for double/triple-click
-	lastClickTime  int64 // unix nano of last click
-	lastClickRow   int
-	lastClickCol   int
-	clickCount     int   // 1=single, 2=double, 3=triple
+	lastClickTime int64 // unix nano of last click
+	lastClickRow  int
+	lastClickCol  int
+	clickCount    int // 1=single, 2=double, 3=triple
 
 	// Block selection mouse drag state
-	blockDragging  bool
+	blockDragging bool
 
+	// Mouse drag selection state
+	mouseDragging  bool
+	mouseAnchorRow int
+	mouseAnchorCol int
 }
 
 // BreadcrumbSymbol represents a symbol for breadcrumb display.
@@ -184,7 +188,7 @@ type BreadcrumbSymbol struct {
 
 // DiagnosticInfo holds diagnostic data for a single line
 type DiagnosticInfo struct {
-	Severity int    // 1=error, 2=warning, 3=info, 4=hint
+	Severity int // 1=error, 2=warning, 3=info, 4=hint
 	Message  string
 }
 
@@ -569,7 +573,6 @@ func (e *Editor) Focus(delegate func(p tview.Primitive)) {
 	e.hasFocus = true
 	e.Box.Focus(delegate)
 }
-
 func (e *Editor) Blur() {
 	e.hasFocus = false
 	e.Box.Blur()
@@ -579,6 +582,7 @@ func (e *Editor) HasFocus() bool {
 	return e.hasFocus
 }
 
+// TODO: test annotation scanner
 func (e *Editor) notifyTabChange() {
 	e.hlVersion++
 	e.cachedHL = nil
@@ -905,7 +909,6 @@ func (e *Editor) SaveAs(filePath string) error {
 	tab.Highlighter.DetectLanguage(filePath)
 	return e.SaveCurrentFile()
 }
-
 
 // ReloadCurrentFile re-reads the active tab's file from disk into the buffer.
 func (e *Editor) ReloadCurrentFile() error {
@@ -4049,6 +4052,22 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 				return true, nil
 			}
 
+			// Shift+Click: extend existing selection to click position
+			if mods&tcell.ModShift != 0 {
+				if !tab.HasSelect {
+					// Start selection from current cursor
+					tab.HasSelect = true
+					tab.SelectStart = [2]int{tab.CursorRow, tab.CursorCol}
+				}
+				tab.CursorRow = row
+				tab.CursorCol = col
+				e.clampCursor(tab)
+				tab.SelectEnd = [2]int{tab.CursorRow, tab.CursorCol}
+				e.clearBlockSelection(tab)
+				e.notifyChange()
+				return true, nil
+			}
+
 			// Single click
 			if e.wordWrap {
 				e.handleWrappedClick(tab, editorX, editorY, bw, gutterW)
@@ -4098,8 +4117,9 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 			return true, nil
 
 		case tview.MouseLeftDown:
-			// Check for Alt+Shift drag start
+			setFocus(e)
 			mods := event.Modifiers()
+			// Check for Alt+Shift drag start (block selection)
 			if mods&tcell.ModAlt != 0 && mods&tcell.ModShift != 0 {
 				row := tab.ScrollRow + editorY
 				col := editorX + tab.ScrollCol
@@ -4120,7 +4140,26 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 				}
 				return true, e
 			}
-			return false, nil
+
+			// Start normal mouse drag selection
+			row := tab.ScrollRow + editorY
+			col := editorX + tab.ScrollCol
+			if row >= 0 && row < tab.Buffer.LineCount() {
+				tab.CursorRow = row
+				tab.CursorCol = col
+				e.clampCursor(tab)
+				e.clearBlockSelection(tab)
+
+				// Set anchor for drag
+				e.mouseDragging = true
+				e.mouseAnchorRow = tab.CursorRow
+				e.mouseAnchorCol = tab.CursorCol
+
+				// Don't start selection yet -- wait for MouseMove to confirm drag
+				e.clearSelection(tab)
+				e.notifyChange()
+			}
+			return true, e
 
 		case tview.MouseMove:
 			// Handle block selection drag
@@ -4143,11 +4182,67 @@ func (e *Editor) MouseHandler() func(action tview.MouseAction, event *tcell.Even
 				e.notifyChange()
 				return true, e
 			}
+
+			// Handle normal mouse drag selection
+			if e.mouseDragging {
+				_, _, _, bh := e.GetInnerRect()
+				editorHeight := bh - 1 // tab bar
+				if ui.Style.Modern {
+					editorHeight-- // breadcrumb
+				}
+
+				row := tab.ScrollRow + editorY
+				col := editorX + tab.ScrollCol
+
+				// Auto-scroll when dragging past visible area
+				if editorY < 0 {
+					// Dragging above visible area
+					if tab.ScrollRow > 0 {
+						tab.ScrollRow--
+					}
+					row = tab.ScrollRow
+				} else if editorY >= editorHeight {
+					// Dragging below visible area
+					if tab.ScrollRow < tab.Buffer.LineCount()-1 {
+						tab.ScrollRow++
+					}
+					row = tab.ScrollRow + editorHeight - 1
+				}
+
+				if row < 0 {
+					row = 0
+				}
+				if row >= tab.Buffer.LineCount() {
+					row = tab.Buffer.LineCount() - 1
+				}
+				if col < 0 {
+					col = 0
+				}
+
+				tab.CursorRow = row
+				tab.CursorCol = col
+				e.clampCursor(tab)
+
+				// Set selection from anchor to current position
+				tab.HasSelect = true
+				tab.SelectStart = [2]int{e.mouseAnchorRow, e.mouseAnchorCol}
+				tab.SelectEnd = [2]int{tab.CursorRow, tab.CursorCol}
+				e.notifyChange()
+				return true, e
+			}
 			return false, nil
 
 		case tview.MouseLeftUp:
 			if e.blockDragging {
 				e.blockDragging = false
+				return true, nil
+			}
+			if e.mouseDragging {
+				e.mouseDragging = false
+				// If selection start equals end, clear it (was just a click, no drag)
+				if tab.HasSelect && tab.SelectStart[0] == tab.SelectEnd[0] && tab.SelectStart[1] == tab.SelectEnd[1] {
+					e.clearSelection(tab)
+				}
 				return true, nil
 			}
 			return false, nil

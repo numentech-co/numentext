@@ -31,6 +31,23 @@ type Panel struct {
 
 	// Clickable regions for block header buttons
 	clickRegions []clickRegion
+
+	// Mouse drag selection state
+	mouseDragging bool
+	hasSelection  bool
+	selStartRow   int // row in the virtual coordinate space (scrollback + VT)
+	selStartCol   int
+	selEndRow     int
+	selEndCol     int
+	anchorRow     int // drag anchor in virtual coordinates
+	anchorCol     int
+
+	// Cached geometry from last Draw for mouse coord translation
+	lastInnerX int
+	lastInnerY int
+	lastWidth  int
+	lastHeight int
+	lastTabRows int
 }
 
 // NewPanel creates a new terminal panel widget
@@ -170,6 +187,13 @@ func (p *Panel) Draw(screen tcell.Screen) {
 	y += tabRows
 	height -= tabRows
 
+	// Cache geometry for mouse coordinate translation
+	p.lastInnerX = x
+	p.lastInnerY = y
+	p.lastWidth = width
+	p.lastHeight = height
+	p.lastTabRows = tabRows
+
 	if p.term == nil {
 		// Draw empty panel with message
 		msg := "Press Ctrl+` to open terminal"
@@ -236,6 +260,11 @@ func (p *Panel) Draw(screen tcell.Screen) {
 
 	// Reset dirty flag so next PTY read can trigger a new redraw
 	p.term.MarkClean()
+
+	// Overlay selection highlighting
+	if p.hasSelection {
+		p.drawSelectionOverlay(screen, x, y, width, height)
+	}
 }
 
 // drawBoxed renders all command blocks as boxes, with a prompt line at the bottom.
@@ -710,6 +739,17 @@ func (p *Panel) InputHandler() func(event *tcell.EventKey, setFocus func(tview.P
 		ctrl := mod&tcell.ModCtrl != 0
 		shift := mod&tcell.ModShift != 0
 
+		// Ctrl+C with selection: copy text instead of sending SIGINT
+		if key == tcell.KeyCtrlC && p.hasSelection {
+			p.copySelection()
+			return
+		}
+
+		// Any keypress clears selection
+		if p.hasSelection {
+			p.ClearSelection()
+		}
+
 		// Block navigation: Ctrl+Up/Down to select blocks
 		if ctrl && !shift {
 			switch key {
@@ -926,7 +966,239 @@ func clipboardCopy(text string) {
 	_ = cmd.Run()
 }
 
-// MouseHandler handles mouse events (scrolling, block clicks)
+// drawSelectionOverlay applies selection highlighting over the rendered terminal.
+// It uses virtual row coordinates (scrollback lines + VT rows) for selection,
+// and maps them to screen rows based on the current scroll offset.
+func (p *Panel) drawSelectionOverlay(screen tcell.Screen, x, y, width, height int) {
+	sr, sc, er, ec := p.orderedSelection()
+	selStyle := tcell.StyleDefault.
+		Foreground(tcell.ColorWhite).
+		Background(tcell.ColorDarkBlue)
+
+	// We need to figure out which virtual rows are visible.
+	// In raw mode: scrollback lines are shown first, then VT rows.
+	// Virtual row = scrollback index (for scrollback) or scrollbackLen + vtRow (for VT).
+	p.term.Lock()
+	vt := p.term.VT()
+	scrollback := vt.Scrollback()
+	scrollbackLen := len(scrollback)
+	vtRows := vt.Rows()
+	vtCols := vt.Cols()
+
+	scrollOff := p.scrollOff
+	if scrollOff > scrollbackLen {
+		scrollOff = scrollbackLen
+	}
+
+	// Map screen rows to virtual rows
+	for screenRow := 0; screenRow < height; screenRow++ {
+		var virtualRow int
+		var lineLen int
+
+		if scrollOff > 0 {
+			// Scrollback area
+			sbStart := scrollbackLen - scrollOff
+			sbIdx := sbStart + screenRow
+			if sbIdx < scrollbackLen {
+				virtualRow = sbIdx
+				lineLen = len(scrollback[sbIdx])
+			} else {
+				vtR := sbIdx - scrollbackLen
+				if vtR >= vtRows {
+					continue
+				}
+				virtualRow = scrollbackLen + vtR
+				lineLen = vtCols
+			}
+		} else {
+			vtR := screenRow
+			if vtR >= vtRows {
+				continue
+			}
+			virtualRow = scrollbackLen + vtR
+			lineLen = vtCols
+		}
+
+		if virtualRow < sr || virtualRow > er {
+			continue
+		}
+
+		colStart := 0
+		colEnd := lineLen
+		if virtualRow == sr {
+			colStart = sc
+		}
+		if virtualRow == er {
+			colEnd = ec
+		}
+		if colEnd > width {
+			colEnd = width
+		}
+
+		for col := colStart; col < colEnd; col++ {
+			if col < 0 || col >= width {
+				continue
+			}
+			// Read current content and re-render with selection style
+			mainC, combC, _, _ := screen.GetContent(x+col, y+screenRow)
+			screen.SetContent(x+col, y+screenRow, mainC, combC, selStyle)
+		}
+	}
+	p.term.Unlock()
+}
+
+// orderedSelection returns selection bounds ordered so start <= end.
+func (p *Panel) orderedSelection() (int, int, int, int) {
+	sr, sc := p.selStartRow, p.selStartCol
+	er, ec := p.selEndRow, p.selEndCol
+	if sr > er || (sr == er && sc > ec) {
+		sr, sc, er, ec = er, ec, sr, sc
+	}
+	return sr, sc, er, ec
+}
+
+// ClearSelection clears any text selection in the terminal panel.
+func (p *Panel) ClearSelection() {
+	p.hasSelection = false
+}
+
+// HasTextSelection returns true if the terminal panel has selected text.
+func (p *Panel) HasTextSelection() bool {
+	return p.hasSelection
+}
+
+// screenToVirtualCoords converts screen mouse coordinates to virtual row/col.
+// Virtual rows: 0..scrollbackLen-1 are scrollback, scrollbackLen..scrollbackLen+vtRows-1 are VT.
+func (p *Panel) screenToVirtualCoords(mx, my int) (int, int) {
+	relX := mx - p.lastInnerX
+	relY := my - p.lastInnerY
+
+	if relX < 0 {
+		relX = 0
+	}
+
+	p.term.Lock()
+	scrollback := p.term.VT().Scrollback()
+	scrollbackLen := len(scrollback)
+	p.term.Unlock()
+
+	scrollOff := p.scrollOff
+	if scrollOff > scrollbackLen {
+		scrollOff = scrollbackLen
+	}
+
+	var virtualRow int
+	if scrollOff > 0 {
+		sbStart := scrollbackLen - scrollOff
+		virtualRow = sbStart + relY
+	} else {
+		virtualRow = scrollbackLen + relY
+	}
+
+	return virtualRow, relX
+}
+
+// selectedText extracts the text from the current selection.
+func (p *Panel) selectedText() string {
+	if !p.hasSelection {
+		return ""
+	}
+
+	sr, sc, er, ec := p.orderedSelection()
+
+	p.term.Lock()
+	vt := p.term.VT()
+	scrollback := vt.Scrollback()
+	scrollbackLen := len(scrollback)
+	vtRows := vt.Rows()
+	vtCols := vt.Cols()
+	p.term.Unlock()
+
+	totalRows := scrollbackLen + vtRows
+	if sr < 0 {
+		sr = 0
+	}
+	if er >= totalRows {
+		er = totalRows - 1
+	}
+
+	var sb strings.Builder
+	for r := sr; r <= er; r++ {
+		var lineText string
+		if r < scrollbackLen {
+			// Scrollback line
+			line := scrollback[r]
+			var lb strings.Builder
+			for _, cell := range line {
+				ch := cell.Ch
+				if ch == 0 {
+					ch = ' '
+				}
+				lb.WriteRune(ch)
+			}
+			lineText = lb.String()
+		} else {
+			// VT line
+			vtR := r - scrollbackLen
+			if vtR >= vtRows {
+				continue
+			}
+			var lb strings.Builder
+			p.term.Lock()
+			for c := 0; c < vtCols; c++ {
+				cell := vt.Cell(vtR, c)
+				ch := cell.Ch
+				if ch == 0 {
+					ch = ' '
+				}
+				lb.WriteRune(ch)
+			}
+			p.term.Unlock()
+			lineText = lb.String()
+		}
+
+		startCol := 0
+		endCol := len(lineText)
+		if r == sr {
+			startCol = sc
+		}
+		if r == er {
+			endCol = ec
+		}
+		if startCol > len(lineText) {
+			startCol = len(lineText)
+		}
+		if endCol > len(lineText) {
+			endCol = len(lineText)
+		}
+		if startCol <= endCol {
+			sb.WriteString(lineText[startCol:endCol])
+		}
+		if r < er {
+			sb.WriteString("\n")
+		}
+	}
+
+	// Trim trailing spaces from each line
+	lines := strings.Split(sb.String(), "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// copySelection copies the selected text to clipboard.
+func (p *Panel) copySelection() {
+	text := p.selectedText()
+	if text == "" {
+		return
+	}
+	clipboardCopy(text)
+	p.statusMsg("Copied to clipboard")
+	p.ClearSelection()
+}
+
+// MouseHandler handles mouse events (scrolling, block clicks, drag selection)
 func (p *Panel) MouseHandler() func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(tview.Primitive)) (bool, tview.Primitive) {
 	return p.WrapMouseHandler(func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(tview.Primitive)) (bool, tview.Primitive) {
 		if !p.InRect(event.Position()) {
@@ -936,6 +1208,8 @@ func (p *Panel) MouseHandler() func(action tview.MouseAction, event *tcell.Event
 		if p.term == nil {
 			return false, nil
 		}
+
+		mx, my := event.Position()
 
 		switch action {
 		case tview.MouseScrollUp:
@@ -953,9 +1227,51 @@ func (p *Panel) MouseHandler() func(action tview.MouseAction, event *tcell.Event
 				p.scrollOff = 0
 			}
 			return true, nil
+
+		case tview.MouseLeftDown:
+			setFocus(p)
+			// Check click regions first (block header buttons)
+			for _, cr := range p.clickRegions {
+				if my == cr.y && mx >= cr.x && mx < cr.x+cr.w {
+					// Don't start drag on click regions
+					return true, nil
+				}
+			}
+			// Start drag selection
+			vRow, vCol := p.screenToVirtualCoords(mx, my)
+			p.mouseDragging = true
+			p.anchorRow = vRow
+			p.anchorCol = vCol
+			p.ClearSelection()
+			return true, p
+
+		case tview.MouseMove:
+			if p.mouseDragging {
+				vRow, vCol := p.screenToVirtualCoords(mx, my)
+				p.hasSelection = true
+				p.selStartRow = p.anchorRow
+				p.selStartCol = p.anchorCol
+				p.selEndRow = vRow
+				p.selEndCol = vCol
+				return true, p
+			}
+			return false, nil
+
+		case tview.MouseLeftUp:
+			if p.mouseDragging {
+				p.mouseDragging = false
+				// If start equals end, it was just a click - clear selection
+				if p.hasSelection &&
+					p.selStartRow == p.selEndRow &&
+					p.selStartCol == p.selEndCol {
+					p.ClearSelection()
+				}
+				return true, nil
+			}
+			return false, nil
+
 		case tview.MouseLeftClick:
 			setFocus(p)
-			mx, my := event.Position()
 			// Check click regions for toggle/copy buttons
 			for _, cr := range p.clickRegions {
 				if my == cr.y && mx >= cr.x && mx < cr.x+cr.w {
@@ -977,6 +1293,8 @@ func (p *Panel) MouseHandler() func(action tview.MouseAction, event *tcell.Event
 					return true, nil
 				}
 			}
+			// Click without drag clears selection
+			p.ClearSelection()
 			return true, nil
 		}
 
