@@ -57,6 +57,12 @@ func (h *mockHost) Exec(command string, args []string, workDir string) (string, 
 	return "", nil
 }
 func (h *mockHost) SetGutterMarkers(filePath string, markers map[int]string) {}
+func (h *mockHost) RenderMarkdownToPanel(name, markdown string) {
+	h.panelContent[name] = RenderMarkdownToTview(markdown)
+}
+func (h *mockHost) RenderCodeToPanel(name, code, language string) {
+	h.panelContent[name] = RenderCodeToTview(code, language)
+}
 
 func createTestPlugin(t *testing.T, dir, name, initLua string) string {
 	t.Helper()
@@ -306,6 +312,166 @@ func TestManager_PanelOperations(t *testing.T) {
 	}
 	if !host.shownPanels["preview"] {
 		t.Error("expected panel to be shown")
+	}
+}
+
+func TestManager_PanelOnSelect(t *testing.T) {
+	dir := t.TempDir()
+	host := newMockHost()
+	mgr := NewManager(host)
+	mgr.SetPluginDir(dir)
+
+	createTestPlugin(t, dir, "select-test", `
+		numen.register_panel("items", "bottom")
+		numen.panel_set_content("items", "apple\nbanana\ncherry")
+		numen.panel_on_select("items", function(idx, text)
+			numen.status_message("selected:" .. idx .. ":" .. text)
+		end)
+	`)
+
+	if err := mgr.LoadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	p, ok := mgr.Registry().Panel("items")
+	if !ok {
+		t.Fatal("expected panel 'items'")
+	}
+	if p.SelectCallback == nil {
+		t.Fatal("expected select callback to be set")
+	}
+}
+
+func TestManager_PanelOnKey(t *testing.T) {
+	dir := t.TempDir()
+	host := newMockHost()
+	mgr := NewManager(host)
+	mgr.SetPluginDir(dir)
+
+	createTestPlugin(t, dir, "key-test", `
+		numen.register_panel("interactive", "bottom")
+		numen.panel_on_key("interactive", function(key)
+			numen.status_message("key:" .. key)
+			return true
+		end)
+	`)
+
+	if err := mgr.LoadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	p, ok := mgr.Registry().Panel("interactive")
+	if !ok {
+		t.Fatal("expected panel 'interactive'")
+	}
+	if p.KeyCallback == nil {
+		t.Fatal("expected key callback to be set")
+	}
+}
+
+func TestManager_RenderMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	host := newMockHost()
+	mgr := NewManager(host)
+	mgr.SetPluginDir(dir)
+
+	createTestPlugin(t, dir, "md-test", `
+		numen.register_panel("doc", "bottom")
+		numen.render_markdown("doc", "# Hello\nSome **bold** text")
+	`)
+
+	if err := mgr.LoadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	content := host.panelContent["doc"]
+	if content == "" {
+		t.Fatal("expected panel content to be set")
+	}
+	if !strings.Contains(content, "Hello") {
+		t.Errorf("expected 'Hello' in rendered content, got %q", content)
+	}
+	if !strings.Contains(content, "bold") {
+		t.Errorf("expected 'bold' in rendered content, got %q", content)
+	}
+}
+
+func TestManager_RenderCode(t *testing.T) {
+	dir := t.TempDir()
+	host := newMockHost()
+	mgr := NewManager(host)
+	mgr.SetPluginDir(dir)
+
+	createTestPlugin(t, dir, "code-test", `
+		numen.register_panel("source", "bottom")
+		numen.render_code("source", "def hello():\n    pass", "Python")
+	`)
+
+	if err := mgr.LoadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	content := host.panelContent["source"]
+	if content == "" {
+		t.Fatal("expected panel content to be set")
+	}
+	if !strings.Contains(content, "def") {
+		t.Errorf("expected 'def' in rendered content, got %q", content)
+	}
+}
+
+func TestManager_PanelCellOperations(t *testing.T) {
+	dir := t.TempDir()
+	host := newMockHost()
+	mgr := NewManager(host)
+	mgr.SetPluginDir(dir)
+
+	createTestPlugin(t, dir, "cell-test", `
+		numen.register_panel("notebook", "bottom")
+		numen.panel_add_cell("notebook", "code", "Go", "package main")
+		numen.panel_add_cell("notebook", "markdown", "", "# Title")
+		numen.panel_add_cell("notebook", "output", "", "result here")
+	`)
+
+	if err := mgr.LoadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	cells := mgr.Registry().PanelCells("notebook")
+	if len(cells) != 3 {
+		t.Fatalf("expected 3 cells, got %d", len(cells))
+	}
+	if cells[0].Type != "code" || cells[0].Language != "Go" || cells[0].Content != "package main" {
+		t.Errorf("unexpected cell 0: %+v", cells[0])
+	}
+	if cells[1].Type != "markdown" || cells[1].Content != "# Title" {
+		t.Errorf("unexpected cell 1: %+v", cells[1])
+	}
+	if cells[2].Type != "output" || cells[2].Content != "result here" {
+		t.Errorf("unexpected cell 2: %+v", cells[2])
+	}
+}
+
+func TestManager_PanelClearCells(t *testing.T) {
+	dir := t.TempDir()
+	host := newMockHost()
+	mgr := NewManager(host)
+	mgr.SetPluginDir(dir)
+
+	createTestPlugin(t, dir, "clear-test", `
+		numen.register_panel("nb", "bottom")
+		numen.panel_add_cell("nb", "code", "Go", "x := 1")
+		numen.panel_add_cell("nb", "raw", "", "text")
+		numen.panel_clear_cells("nb")
+	`)
+
+	if err := mgr.LoadAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	cells := mgr.Registry().PanelCells("nb")
+	if len(cells) != 0 {
+		t.Errorf("expected 0 cells after clear, got %d", len(cells))
 	}
 }
 

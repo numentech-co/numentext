@@ -112,3 +112,129 @@ func TestExtensionRegistry_UnregisterPlugin(t *testing.T) {
 		t.Error("expected 0 shortcuts after unregister")
 	}
 }
+
+func TestExtensionRegistry_PanelSelectCallback(t *testing.T) {
+	r := NewExtensionRegistry()
+	lr := NewLuaRuntime()
+	defer lr.Close()
+
+	lr.DoString(`function on_select(idx, text) end`)
+	fn := lr.State().GetGlobal("on_select").(*lua.LFunction)
+
+	r.RegisterPanel(PanelInfo{
+		Name:       "selectable",
+		Position:   "bottom",
+		PluginName: "test",
+	})
+
+	r.SetPanelSelectCallback("selectable", fn, lr)
+
+	p, ok := r.Panel("selectable")
+	if !ok {
+		t.Fatal("expected panel 'selectable'")
+	}
+	if p.SelectCallback == nil {
+		t.Error("expected select callback to be set")
+	}
+	if p.SelectRuntime != lr {
+		t.Error("expected select runtime to match")
+	}
+}
+
+func TestExtensionRegistry_PanelKeyCallback(t *testing.T) {
+	r := NewExtensionRegistry()
+	lr := NewLuaRuntime()
+	defer lr.Close()
+
+	lr.DoString(`function on_key(key) return true end`)
+	fn := lr.State().GetGlobal("on_key").(*lua.LFunction)
+
+	r.RegisterPanel(PanelInfo{
+		Name:       "keyed",
+		Position:   "bottom",
+		PluginName: "test",
+	})
+
+	r.SetPanelKeyCallback("keyed", fn, lr)
+
+	p, ok := r.Panel("keyed")
+	if !ok {
+		t.Fatal("expected panel 'keyed'")
+	}
+	if p.KeyCallback == nil {
+		t.Error("expected key callback to be set")
+	}
+}
+
+func TestExtensionRegistry_PanelSelectedRow(t *testing.T) {
+	r := NewExtensionRegistry()
+	r.RegisterPanel(PanelInfo{
+		Name:       "nav",
+		Position:   "bottom",
+		PluginName: "test",
+	})
+
+	r.SetPanelSelectedRow("nav", 5)
+
+	p, _ := r.Panel("nav")
+	if p.SelectedRow != 5 {
+		t.Errorf("expected selected row 5, got %d", p.SelectedRow)
+	}
+}
+
+func TestExtensionRegistry_PanelCells(t *testing.T) {
+	r := NewExtensionRegistry()
+	r.RegisterPanel(PanelInfo{
+		Name:       "notebook",
+		Position:   "bottom",
+		PluginName: "test",
+	})
+
+	r.AddPanelCell("notebook", PanelCell{Type: "code", Language: "Go", Content: "package main"})
+	r.AddPanelCell("notebook", PanelCell{Type: "markdown", Content: "# Hello"})
+	r.AddPanelCell("notebook", PanelCell{Type: "output", Content: "success"})
+
+	cells := r.PanelCells("notebook")
+	if len(cells) != 3 {
+		t.Fatalf("expected 3 cells, got %d", len(cells))
+	}
+	if cells[0].Type != "code" || cells[0].Language != "Go" {
+		t.Errorf("unexpected first cell: %+v", cells[0])
+	}
+	if cells[1].Type != "markdown" {
+		t.Errorf("unexpected second cell: %+v", cells[1])
+	}
+	if cells[2].Type != "output" || cells[2].Content != "success" {
+		t.Errorf("unexpected third cell: %+v", cells[2])
+	}
+
+	r.ClearPanelCells("notebook")
+	cells = r.PanelCells("notebook")
+	if len(cells) != 0 {
+		t.Errorf("expected 0 cells after clear, got %d", len(cells))
+	}
+}
+
+func TestExtensionRegistry_PanelCells_NonexistentPanel(t *testing.T) {
+	r := NewExtensionRegistry()
+	cells := r.PanelCells("nonexistent")
+	if cells != nil {
+		t.Errorf("expected nil for nonexistent panel, got %v", cells)
+	}
+}
+
+func TestExtensionRegistry_SetCallbackOnNonexistentPanel(t *testing.T) {
+	r := NewExtensionRegistry()
+	lr := NewLuaRuntime()
+	defer lr.Close()
+
+	lr.DoString(`function noop() end`)
+	fn := lr.State().GetGlobal("noop").(*lua.LFunction)
+
+	// Should not panic on nonexistent panel
+	r.SetPanelSelectCallback("nonexistent", fn, lr)
+	r.SetPanelKeyCallback("nonexistent", fn, lr)
+	r.SetPanelSelectedRow("nonexistent", 0)
+	r.AddPanelCell("nonexistent", PanelCell{Type: "raw", Content: "test"})
+	r.ClearPanelCells("nonexistent")
+}

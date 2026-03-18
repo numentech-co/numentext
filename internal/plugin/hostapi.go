@@ -26,6 +26,8 @@ type PluginHost interface {
 	AppendPanelContent(name, text string)
 	Exec(command string, args []string, workDir string) (string, error)
 	SetGutterMarkers(filePath string, markers map[int]string)
+	RenderMarkdownToPanel(name, markdown string)
+	RenderCodeToPanel(name, code, language string)
 }
 
 // registerHostAPI registers the "numen" global table on the Lua state
@@ -264,6 +266,67 @@ func registerHostAPI(lr *LuaRuntime, host PluginHost, pluginName string, registr
 		})
 
 		host.SetGutterMarkers(filePath, markers)
+		return 0
+	}))
+
+	// numen.panel_on_select(name, callback) -- Epic 45.1
+	// Makes panel rows selectable. Up/Down navigates, Enter/Click triggers callback(row_index, row_text).
+	numen.RawSetString("panel_on_select", L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		fn := L.CheckFunction(2)
+		registry.SetPanelSelectCallback(name, fn, lr)
+		return 0
+	}))
+
+	// numen.panel_on_key(name, callback) -- Epic 48.4
+	// Forwards key events to plugin. Callback receives key name string.
+	// If callback returns true, the key is consumed.
+	numen.RawSetString("panel_on_key", L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		fn := L.CheckFunction(2)
+		registry.SetPanelKeyCallback(name, fn, lr)
+		return 0
+	}))
+
+	// numen.render_markdown(panel_name, markdown_text) -- Epic 48.1
+	// Renders markdown with the core's markdown preview engine.
+	numen.RawSetString("render_markdown", L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		text := L.CheckString(2)
+		host.RenderMarkdownToPanel(name, text)
+		return 0
+	}))
+
+	// numen.render_code(panel_name, code, language) -- Epic 48.2
+	// Renders code with Chroma syntax highlighting.
+	numen.RawSetString("render_code", L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		code := L.CheckString(2)
+		lang := L.CheckString(3)
+		host.RenderCodeToPanel(name, code, lang)
+		return 0
+	}))
+
+	// numen.panel_add_cell(panel_name, type, language, content) -- Epic 48.3
+	// Adds a cell to the panel's cell-based layout.
+	numen.RawSetString("panel_add_cell", L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		cellType := L.CheckString(2)
+		lang := L.OptString(3, "")
+		content := L.OptString(4, "")
+		registry.AddPanelCell(name, PanelCell{
+			Type:     cellType,
+			Language: lang,
+			Content:  content,
+		})
+		return 0
+	}))
+
+	// numen.panel_clear_cells(panel_name) -- Epic 48.3
+	// Removes all cells from the panel.
+	numen.RawSetString("panel_clear_cells", L.NewFunction(func(L *lua.LState) int {
+		name := L.CheckString(1)
+		registry.ClearPanelCells(name)
 		return 0
 	}))
 

@@ -3691,6 +3691,14 @@ func (a *App) Exec(command string, args []string, workDir string) (string, error
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+func (a *App) RenderMarkdownToPanel(name, markdown string) {
+	rendered := plugin.RenderMarkdownToTview(markdown)
+	a.PluginSetPanelContent(name, rendered)
+}
+func (a *App) RenderCodeToPanel(name, code, language string) {
+	rendered := plugin.RenderCodeToTview(code, language)
+	a.PluginSetPanelContent(name, rendered)
+}
 func (a *App) SetGutterMarkers(filePath string, markers map[int]string) {
 	for _, tab := range a.editor.Tabs() {
 		if tab.FilePath == filePath {

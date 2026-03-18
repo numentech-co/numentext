@@ -45,6 +45,25 @@ type PanelInfo struct {
 	Name       string
 	Position   string // "bottom" or "right"
 	PluginName string
+
+	// Interactivity callbacks (Epic 45)
+	SelectCallback *lua.LFunction // called with (row_index, row_text) on Enter/click
+	SelectRuntime  *LuaRuntime
+	SelectedRow    int // currently highlighted row (0-based)
+
+	// Key forwarding callback (Epic 48.4)
+	KeyCallback *lua.LFunction // called with (key_name_string); returns true to consume
+	KeyRuntime  *LuaRuntime
+
+	// Cell-based layout (Epic 48.3)
+	Cells []PanelCell
+}
+
+// PanelCell represents one cell in a cell-based panel layout.
+type PanelCell struct {
+	Type     string // "code", "markdown", "output", "raw"
+	Language string // language for code cells
+	Content  string
 }
 
 // ExtensionRegistry holds all plugin-registered commands, menus, shortcuts, etc.
@@ -152,6 +171,71 @@ func (r *ExtensionRegistry) Panel(name string) (PanelInfo, bool) {
 	defer r.mu.RUnlock()
 	p, ok := r.panels[name]
 	return p, ok
+}
+
+// SetPanelSelectCallback sets the select callback for a panel.
+func (r *ExtensionRegistry) SetPanelSelectCallback(name string, fn *lua.LFunction, runtime *LuaRuntime) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, ok := r.panels[name]; ok {
+		p.SelectCallback = fn
+		p.SelectRuntime = runtime
+		r.panels[name] = p
+	}
+}
+
+// SetPanelKeyCallback sets the key event callback for a panel.
+func (r *ExtensionRegistry) SetPanelKeyCallback(name string, fn *lua.LFunction, runtime *LuaRuntime) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, ok := r.panels[name]; ok {
+		p.KeyCallback = fn
+		p.KeyRuntime = runtime
+		r.panels[name] = p
+	}
+}
+
+// SetPanelSelectedRow updates the selected row index for a panel.
+func (r *ExtensionRegistry) SetPanelSelectedRow(name string, row int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, ok := r.panels[name]; ok {
+		p.SelectedRow = row
+		r.panels[name] = p
+	}
+}
+
+// AddPanelCell appends a cell to a panel's cell list.
+func (r *ExtensionRegistry) AddPanelCell(name string, cell PanelCell) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, ok := r.panels[name]; ok {
+		p.Cells = append(p.Cells, cell)
+		r.panels[name] = p
+	}
+}
+
+// ClearPanelCells removes all cells from a panel.
+func (r *ExtensionRegistry) ClearPanelCells(name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if p, ok := r.panels[name]; ok {
+		p.Cells = nil
+		r.panels[name] = p
+	}
+}
+
+// PanelCells returns a copy of the cells for a panel.
+func (r *ExtensionRegistry) PanelCells(name string) []PanelCell {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	p, ok := r.panels[name]
+	if !ok {
+		return nil
+	}
+	cells := make([]PanelCell, len(p.Cells))
+	copy(cells, p.Cells)
+	return cells
 }
 
 // UnregisterPlugin removes all registrations for a plugin.
