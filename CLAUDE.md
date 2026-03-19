@@ -2,6 +2,10 @@
 
 Terminal-based IDE written in Go, inspired by Borland C++/Turbo C.
 
+## Development Workflow
+
+This project uses the [Artifex](https://github.com/numentech-co/artifex) structured development toolkit. Requirements are written as markdown, converted to tickets, and implemented through the ticket-implementation agent workflow with validation gates. Use `/next-ticket`, `/mark-done`, and `/ticket-status` slash commands to manage work.
+
 ## Build & Run
 
 ```
