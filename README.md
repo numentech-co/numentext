@@ -4,6 +4,21 @@ A terminal-based IDE written in Go, inspired by Borland C++ and Turbo C.
 
 NumenText is a non-modal, menu-driven editor for people who want a capable IDE in the terminal without learning vim or modal editing. Familiar shortcuts (Ctrl+S, Ctrl+C, F5 to run) work out of the box.
 
+## Install
+
+```bash
+# Homebrew (macOS / Linux)
+brew tap numentech-co/tap && brew install numentext
+
+# Shell installer (macOS / Linux)
+curl -fsSL https://raw.githubusercontent.com/numentech-co/numentext/main/install.sh | bash
+
+# From source (requires Go 1.25+)
+go install github.com/numentech-co/numentext@latest
+```
+
+Pre-built binaries for macOS and Linux (amd64/arm64) are available on the [Releases](https://github.com/numentech-co/numentext/releases) page.
+
 ![Embedded terminal running Claude Code inside NumenText (Borland theme)](docs/screenshots/embedded-terminal-borland.png)
 *Embedded PTY terminal with Claude Code running inside NumenText -- Borland theme*
 
@@ -51,37 +66,6 @@ NumenText is a non-modal, menu-driven editor for people who want a capable IDE i
 ### Binary Hex Viewer
 ![Two-pane hex viewer with synchronized hex and ASCII display (Modern Light theme)](docs/screenshots/hex-viewer-modern-light.png)
 *Binary file auto-detected and opened in hex view. Address column, 16 bytes per row with 8+8 grouping, synchronized ASCII pane -- Modern Light theme*
-
-## Install
-
-### Homebrew (macOS and Linux)
-
-```
-brew install numentech-co/tap/numentext
-```
-
-### Shell installer
-
-```
-curl -fsSL https://raw.githubusercontent.com/numentech-co/numentext/main/install.sh | sh
-```
-
-To install to a custom directory:
-
-```
-INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/numentech-co/numentext/main/install.sh | sh
-```
-
-### From source
-
-Requires Go 1.25 or later.
-
-```
-git clone https://github.com/numentech-co/numentext.git
-cd numentext
-go build -o numentext .
-./numentext
-```
 
 ### Running on a Remote Machine
 
