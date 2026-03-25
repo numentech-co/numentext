@@ -1,0 +1,41 @@
+version: 2
+
+builds:
+  - binary: numentext
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - format: tar.gz
+    name_template: "numentext_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+brews:
+  - repository:
+      owner: numentech-co
+      name: homebrew-tap
+    directory: Formula
+    homepage: "https://github.com/numentech-co/numentext"
+    description: "Terminal-based IDE inspired by Borland C++"
+    license: "Apache-2.0"
+    test: |
+      system "#{bin}/numentext", "--version"
+    install: |
+      bin.install "numentext"

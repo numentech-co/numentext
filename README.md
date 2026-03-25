@@ -54,6 +54,26 @@ NumenText is a non-modal, menu-driven editor for people who want a capable IDE i
 
 ## Install
 
+### Homebrew (macOS and Linux)
+
+```
+brew install numentech-co/tap/numentext
+```
+
+### Shell installer
+
+```
+curl -fsSL https://raw.githubusercontent.com/numentech-co/numentext/main/install.sh | sh
+```
+
+To install to a custom directory:
+
+```
+INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/numentech-co/numentext/main/install.sh | sh
+```
+
+### From source
+
 Requires Go 1.25 or later.
 
 ```

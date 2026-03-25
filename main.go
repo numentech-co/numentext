@@ -11,7 +11,18 @@ import (
 	"numentext/internal/plugin"
 )
 
+// version is set at build time via ldflags:
+//
+//	go build -ldflags "-X main.version=1.0.0" .
+var version = "dev"
+
 func main() {
+	// Print version and exit
+	if len(os.Args) >= 2 && os.Args[1] == "--version" {
+		fmt.Println("numentext " + version)
+		os.Exit(0)
+	}
+
 	// Handle plugin CLI commands before starting the app
 	if len(os.Args) >= 2 {
 		handled, code := handlePluginCLI(os.Args[1:])
