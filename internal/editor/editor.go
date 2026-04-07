@@ -2907,8 +2907,43 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 	visualRow := 0
 	lineIdx := tab.ScrollRow
 
+	// Get markdown blocks for word-wrap mode too
+	var wrappedMdBlocks []BlockInfo
+	if tab.MarkdownMode {
+		wrappedMdBlocks = e.ensureMarkdownBlocks(tab)
+	}
+
 	for visualRow < height && lineIdx < tab.Buffer.LineCount() {
 		line := tab.Buffer.Line(lineIdx)
+
+		// Check for markdown block rendering in word-wrap mode
+		if tab.MarkdownMode && len(wrappedMdBlocks) > 0 {
+			if block := IsInBlock(wrappedMdBlocks, lineIdx); block != nil {
+				cursorInBlock := tab.CursorRow >= block.StartLine && tab.CursorRow <= block.EndLine
+				if !cursorInBlock {
+					// Clear line
+					for cx := x; cx < x+width; cx++ {
+						screen.SetContent(cx, y+visualRow, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
+					}
+					// Draw gutter
+					if e.showLineNumbers {
+						e.drawGutterForLine(screen, x, y+visualRow, gutterW, lineIdx, tab)
+					}
+					// Draw block line
+					editorX := x + gutterW
+					e.drawMarkdownBlockLine(screen, editorX, y+visualRow, editorWidth, lineIdx, tab, block, highlighted)
+					// Track cursor
+					if lineIdx == tab.CursorRow {
+						cursorScreenX = x + gutterW
+						cursorScreenY = y + visualRow
+					}
+					visualRow++
+					lineIdx++
+					continue
+				}
+			}
+		}
+
 		segs := wrapLine(line, editorWidth, e.tabSize)
 
 		for segIdx, seg := range segs {

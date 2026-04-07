@@ -402,7 +402,7 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 		}
 	}
 
-	// Render the placeholder row.
+	// Render the placeholder row
 	placeholder := graphics.FormatPlaceholder(block.ImageAlt, block.ImagePath, imgWidth, imgHeight)
 
 	bg := ColorMarkdownImageBg
