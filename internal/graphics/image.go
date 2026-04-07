@@ -62,14 +62,13 @@ func CellHeight() int {
 	return cellHeight
 }
 
-// Load loads an image from disk, resizes it to fit maxWidthPx pixels wide
-// (preserving aspect ratio), encodes it for the given capability, and
-// caches the result.  Subsequent calls with the same path and maxWidthPx
-// return the cached version.
+// Load loads an image from disk, resizes it to fit within maxWidthPx wide
+// and maxHeightPx tall (preserving aspect ratio, never scaling up), encodes
+// it for the given capability, and caches the result.
 //
 // basePath is the directory used to resolve relative image paths (typically
 // the directory containing the markdown file).
-func (ic *ImageCache) Load(path string, basePath string, maxWidthPx int, cap GraphicsCapability) (*CachedImage, error) {
+func (ic *ImageCache) Load(path string, basePath string, maxWidthPx int, cap GraphicsCapability, maxHeightPx ...int) (*CachedImage, error) {
 	absPath := path
 	if !filepath.IsAbs(path) {
 		absPath = filepath.Join(basePath, path)
@@ -99,13 +98,23 @@ func (ic *ImageCache) Load(path string, basePath string, maxWidthPx int, cap Gra
 	origW := bounds.Dx()
 	origH := bounds.Dy()
 
-	// Resize to fit maxWidthPx, preserving aspect ratio.
+	// Resize to fit within maxWidthPx and maxHeightPx, preserving aspect ratio.
+	// Never scale up -- only scale down if the image exceeds the limits.
 	newW := origW
 	newH := origH
-	if newW > maxWidthPx && maxWidthPx > 0 {
+
+	// Apply width limit (scale down only)
+	if maxWidthPx > 0 && newW > maxWidthPx {
 		newH = origH * maxWidthPx / origW
 		newW = maxWidthPx
 	}
+
+	// Apply height limit (scale down only)
+	if len(maxHeightPx) > 0 && maxHeightPx[0] > 0 && newH > maxHeightPx[0] {
+		newW = newW * maxHeightPx[0] / newH
+		newH = maxHeightPx[0]
+	}
+
 	if newW <= 0 {
 		newW = 1
 	}

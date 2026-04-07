@@ -395,8 +395,13 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 	}
 
 	if basePath != "" && block.ImagePath != "" {
-		// Attempt to load image (cached) to get dimensions and encoding.
-		ci, err := e.imageCache.Load(block.ImagePath, basePath, maxWidth*8, e.graphicsCap)
+		// Scale to fit within 1/3 of editor width and 1/3 of editor height.
+		// Assume 8px per cell width, cellHeight per cell height.
+		_, _, _, editorHeight := e.GetInnerRect()
+		maxImgWidthPx := (maxWidth * 8) / 3
+		maxImgHeightPx := (editorHeight * graphics.CellHeight()) / 3
+
+		ci, err := e.imageCache.Load(block.ImagePath, basePath, maxImgWidthPx, e.graphicsCap, maxImgHeightPx)
 		if err == nil {
 			imgWidth = ci.OrigWidth
 			imgHeight = ci.OrigHeight
