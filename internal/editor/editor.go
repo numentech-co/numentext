@@ -180,6 +180,25 @@ type Editor struct {
 	imageCache  *graphics.ImageCache
 	graphicsCap graphics.GraphicsCapability
 
+	// Pending inline images to render after tcell draw completes.
+	// Collected during Draw(), flushed at the end via raw escape sequences.
+	pendingImages []PendingImage
+
+	// ttyFile is a handle to /dev/tty (or os.Stdout on Windows) for writing
+	// raw escape sequences that bypass tcell's screen buffer.
+	ttyFile *os.File
+}
+
+// PendingImage represents an inline image queued for rendering after the
+// tcell draw cycle. The encoded data (Sixel or Kitty escape sequence) is
+// written directly to the terminal at the specified screen coordinates.
+type PendingImage struct {
+	ScreenRow   int                       // 0-based screen row
+	ScreenCol   int                       // 0-based screen column
+	Width       int                       // width in terminal cells
+	Height      int                       // height in terminal rows
+	EncodedData string                    // Sixel or Kitty escape sequence
+	Protocol    graphics.GraphicsCapability // GraphicsSixel or GraphicsKitty
 }
 
 // BreadcrumbSymbol represents a symbol for breadcrumb display.
@@ -210,6 +229,7 @@ func NewEditor() *Editor {
 		imageCache:      graphics.NewImageCache(),
 		graphicsCap:     graphics.DetectCapability(),
 	}
+	e.ttyFile = openTTY()
 	e.SetBorder(false)
 	e.SetBackgroundColor(ui.ColorBg)
 	return e
@@ -2794,6 +2814,12 @@ func (e *Editor) Draw(screen tcell.Screen) {
 	if e.completion.Visible() {
 		e.completion.Draw(screen, x, y, gutterW, tab.ScrollRow, tab.ScrollCol)
 	}
+
+	// Flush any pending inline images. This writes raw Sixel/Kitty escape
+	// sequences directly to the terminal, bypassing tcell's screen buffer.
+	// It must happen after all SetContent calls so tcell does not overwrite
+	// the image data on the next Show() call.
+	e.flushPendingImages()
 }
 
 // drawScrollbar draws a scrollbar track with thumb and markers on the right edge.
@@ -3028,6 +3054,9 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 	if e.completion.Visible() {
 		e.completion.Draw(screen, x, y, gutterW, tab.ScrollRow, tab.ScrollCol)
 	}
+
+	// Flush pending inline images (same as in Draw).
+	e.flushPendingImages()
 }
 
 // SetBreadcrumbSymbols sets the document symbols for breadcrumb display.

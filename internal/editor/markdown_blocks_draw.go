@@ -386,28 +386,53 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 		return false
 	}
 
-	// Try to load the image to get dimensions for the placeholder.
+	// Try to load the image to get dimensions and encoded data.
 	var imgWidth, imgHeight int
+	var cachedImg *graphics.CachedImage
 	basePath := ""
 	if tab.FilePath != "" {
 		basePath = filepath.Dir(tab.FilePath)
 	}
 
 	if basePath != "" && block.ImagePath != "" {
-		// Attempt to load image (cached) to get dimensions.
+		// Attempt to load image (cached) to get dimensions and encoding.
 		ci, err := e.imageCache.Load(block.ImagePath, basePath, maxWidth*8, e.graphicsCap)
 		if err == nil {
 			imgWidth = ci.OrigWidth
 			imgHeight = ci.OrigHeight
+			cachedImg = ci
 		}
 	}
-
-	// Render the placeholder row
-	placeholder := graphics.FormatPlaceholder(block.ImageAlt, block.ImagePath, imgWidth, imgHeight)
 
 	bg := ColorMarkdownImageBg
 	fg := ColorMarkdownImageFg
 	style := tcell.StyleDefault.Foreground(fg).Background(bg)
+
+	// If we have encoded image data (Sixel or Kitty), queue it for
+	// post-draw output and fill the placeholder row with spaces so tcell
+	// does not overwrite the image area with stale content.
+	if cachedImg != nil && cachedImg.Encoded != "" && e.graphicsCap != graphics.GraphicsNone {
+		// Fill the line with background (clears any previous text).
+		for cx := editorX; cx < editorX+maxWidth; cx++ {
+			screen.SetContent(cx, screenY, ' ', nil, style)
+		}
+
+		// Queue the image for output after the draw cycle.
+		e.pendingImages = append(e.pendingImages, PendingImage{
+			ScreenRow:   screenY,
+			ScreenCol:   editorX,
+			Width:       maxWidth,
+			Height:      cachedImg.TermRows,
+			EncodedData: cachedImg.Encoded,
+			Protocol:    e.graphicsCap,
+		})
+
+		return true
+	}
+
+	// Fallback: render text placeholder for terminals without image support
+	// or when the image could not be loaded/encoded.
+	placeholder := graphics.FormatPlaceholder(block.ImageAlt, block.ImagePath, imgWidth, imgHeight)
 
 	// Fill the full width with background.
 	for cx := editorX; cx < editorX+maxWidth; cx++ {

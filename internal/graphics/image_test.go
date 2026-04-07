@@ -209,6 +209,13 @@ func TestImageCache_Load_Kitty(t *testing.T) {
 	}
 }
 
+func TestCellHeight(t *testing.T) {
+	h := CellHeight()
+	if h != 16 {
+		t.Errorf("CellHeight() = %d, want 16", h)
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

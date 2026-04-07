@@ -57,6 +57,11 @@ func NewImageCache() *ImageCache {
 // Most terminals default to roughly 16-20px per row; 16 is a safe default.
 const cellHeight = 16
 
+// CellHeight returns the assumed pixel height of a single terminal cell row.
+func CellHeight() int {
+	return cellHeight
+}
+
 // Load loads an image from disk, resizes it to fit maxWidthPx pixels wide
 // (preserving aspect ratio), encodes it for the given capability, and
 // caches the result.  Subsequent calls with the same path and maxWidthPx
