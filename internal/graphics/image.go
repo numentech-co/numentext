@@ -142,9 +142,21 @@ func (ic *ImageCache) Load(path string, basePath string, maxWidthPx int, cap Gra
 		termRows = 1
 	}
 
+	// Calculate terminal cell dimensions
+	cellW := 8 // assumed cell width in pixels
+	termCols := (newW + cellW - 1) / cellW
+	if termCols < 1 {
+		termCols = 1
+	}
+
 	// Encode for the target protocol.
 	var encoded string
 	switch cap {
+	case GraphicsITerm:
+		encoded, err = EncodeITerm(resized, termCols, termRows)
+		if err != nil {
+			return nil, fmt.Errorf("iterm encode %s: %w", absPath, err)
+		}
 	case GraphicsSixel:
 		encoded = EncodeSixel(resized)
 	case GraphicsKitty:
