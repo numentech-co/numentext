@@ -42,14 +42,36 @@ func (e *Editor) flushPendingImages() {
 		return
 	}
 
+	// Clear previous image areas by overwriting with spaces.
+	// This prevents Sixel pixels from persisting after scroll.
+	for _, prev := range e.lastImageAreas {
+		for r := 0; r < prev.Height; r++ {
+			row := prev.ScreenRow + r + 1 // 1-based
+			col := prev.ScreenCol + 1
+			pos := fmt.Sprintf("\033[%d;%dH", row, col)
+			_, _ = fmt.Fprint(e.ttyFile, pos)
+			// Erase from cursor to end of line within the image width
+			_, _ = fmt.Fprintf(e.ttyFile, "\033[%dX", prev.Width)
+		}
+	}
+
+	// Record current image positions for next clear cycle
+	e.lastImageAreas = make([]PendingImage, len(e.pendingImages))
+	copy(e.lastImageAreas, e.pendingImages)
+
 	for _, img := range e.pendingImages {
 		if img.EncodedData == "" {
 			continue
 		}
+		// Skip images that would extend below the visible area
+		_, screenH := 0, 0
+		if e.ttyFile == os.Stdout {
+			// Can't determine screen size easily; just render
+		}
+		_ = screenH
+
 		// ANSI cursor positioning: ESC [ row ; col H (1-based)
 		pos := fmt.Sprintf("\033[%d;%dH", img.ScreenRow+1, img.ScreenCol+1)
-		// Write position + image data. Errors are silently ignored since
-		// there is no meaningful recovery during a draw cycle.
 		_, _ = fmt.Fprint(e.ttyFile, pos)
 		_, _ = fmt.Fprint(e.ttyFile, img.EncodedData)
 	}

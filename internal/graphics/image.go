@@ -99,20 +99,30 @@ func (ic *ImageCache) Load(path string, basePath string, maxWidthPx int, cap Gra
 	origH := bounds.Dy()
 
 	// Resize to fit within maxWidthPx and maxHeightPx, preserving aspect ratio.
-	// Never scale up -- only scale down if the image exceeds the limits.
+	// Never scale up -- only scale down if the image exceeds either limit.
+	// Find the most constraining scale factor and apply uniformly.
 	newW := origW
 	newH := origH
 
-	// Apply width limit (scale down only)
-	if maxWidthPx > 0 && newW > maxWidthPx {
-		newH = origH * maxWidthPx / origW
-		newW = maxWidthPx
+	scaleW := 1.0
+	scaleH := 1.0
+
+	if maxWidthPx > 0 && origW > maxWidthPx {
+		scaleW = float64(maxWidthPx) / float64(origW)
+	}
+	if len(maxHeightPx) > 0 && maxHeightPx[0] > 0 && origH > maxHeightPx[0] {
+		scaleH = float64(maxHeightPx[0]) / float64(origH)
 	}
 
-	// Apply height limit (scale down only)
-	if len(maxHeightPx) > 0 && maxHeightPx[0] > 0 && newH > maxHeightPx[0] {
-		newW = newW * maxHeightPx[0] / newH
-		newH = maxHeightPx[0]
+	// Use the smaller scale factor (more constraining dimension)
+	scale := scaleW
+	if scaleH < scale {
+		scale = scaleH
+	}
+
+	if scale < 1.0 {
+		newW = int(float64(origW) * scale)
+		newH = int(float64(origH) * scale)
 	}
 
 	if newW <= 0 {

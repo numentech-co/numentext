@@ -395,13 +395,17 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 	}
 
 	if basePath != "" && block.ImagePath != "" {
-		// Scale to fit within 1/3 of editor width and 1/3 of editor height.
-		// Assume 8px per cell width, cellHeight per cell height.
-		_, _, _, editorHeight := e.GetInnerRect()
-		maxImgWidthPx := (maxWidth * 8) / 3
-		maxImgHeightPx := (editorHeight * graphics.CellHeight()) / 3
+		// Max allowed is 1/3 of editor area in each dimension.
+		_, _, editorW, editorH := e.GetInnerRect()
+		// Subtract tab bar + breadcrumb rows from height
+		editorH -= 2
+		if editorH < 3 {
+			editorH = 3
+		}
+		maxAllowedW := (editorW * 8) / 3   // pixels (8px per cell)
+		maxAllowedH := (editorH * graphics.CellHeight()) / 3 // pixels
 
-		ci, err := e.imageCache.Load(block.ImagePath, basePath, maxImgWidthPx, e.graphicsCap, maxImgHeightPx)
+		ci, err := e.imageCache.Load(block.ImagePath, basePath, maxAllowedW, e.graphicsCap, maxAllowedH)
 		if err == nil {
 			imgWidth = ci.OrigWidth
 			imgHeight = ci.OrigHeight
