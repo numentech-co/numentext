@@ -2767,6 +2767,18 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		if tab.MarkdownMode && mdBlocks != nil {
 			if block := IsInBlock(mdBlocks, lineIdx); block != nil {
 				mdHandled = e.drawMarkdownBlockLine(screen, editorX, y+row, width-gutterW, lineIdx, tab, block, highlighted)
+				// For image blocks, reserve rows for the image height
+				if mdHandled && block.Type == BlockImage && len(e.pendingImages) > 0 {
+					imgRows := e.pendingImages[len(e.pendingImages)-1].Height
+					if imgRows > 1 {
+						for r := 1; r < imgRows && row+r < height; r++ {
+							for cx := x; cx < x+width; cx++ {
+								screen.SetContent(cx, y+row+r, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
+							}
+						}
+						row += imgRows - 1 // -1 because the loop does row++ at the end
+					}
+				}
 			}
 		}
 
@@ -2963,7 +2975,23 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 						cursorScreenX = x + gutterW
 						cursorScreenY = y + visualRow
 					}
-					visualRow++
+					// For image blocks, reserve rows for the image height
+					if block.Type == BlockImage && len(e.pendingImages) > 0 {
+						imgRows := e.pendingImages[len(e.pendingImages)-1].Height
+						if imgRows > 1 {
+							// Clear the reserved rows so text doesn't show through
+							for r := 1; r < imgRows && visualRow+r < height; r++ {
+								for cx := x; cx < x+width; cx++ {
+									screen.SetContent(cx, y+visualRow+r, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
+								}
+							}
+							visualRow += imgRows
+						} else {
+							visualRow++
+						}
+					} else {
+						visualRow++
+					}
 					lineIdx++
 					continue
 				}
