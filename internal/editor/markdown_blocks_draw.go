@@ -381,11 +381,6 @@ func (e *Editor) drawFrontmatterLine(screen tcell.Screen, editorX, screenY, maxW
 func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth int, lineIdx int, tab *Tab, block *BlockInfo, cursorInBlock bool) bool {
 	cursorOnLine := tab.CursorRow == lineIdx
 
-	if cursorOnLine {
-		// Show raw ![alt](path) syntax for editing
-		return false
-	}
-
 	// Try to load the image to get dimensions and encoded data.
 	var imgWidth, imgHeight int
 	var cachedImg *graphics.CachedImage
@@ -413,17 +408,37 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 		}
 	}
 
+	// When cursor is on the image line and terminal doesn't support graphics,
+	// fall back to normal text rendering (show raw markdown syntax).
+	if cursorOnLine && (cachedImg == nil || cachedImg.Encoded == "" || e.graphicsCap == graphics.GraphicsNone) {
+		return false
+	}
+
 	bg := ColorMarkdownImageBg
 	fg := ColorMarkdownImageFg
 	style := tcell.StyleDefault.Foreground(fg).Background(bg)
 
 	// If we have encoded image data (Sixel or Kitty), queue it for
-	// post-draw output and fill the placeholder row with spaces so tcell
-	// does not overwrite the image area with stale content.
+	// post-draw output. When cursor is on the line, still render the image
+	// but overlay the raw markdown text on top for editing.
 	if cachedImg != nil && cachedImg.Encoded != "" && e.graphicsCap != graphics.GraphicsNone {
 		// Fill the line with background (clears any previous text).
 		for cx := editorX; cx < editorX+maxWidth; cx++ {
 			screen.SetContent(cx, screenY, ' ', nil, style)
+		}
+
+		// When cursor is on the image line, overlay the editable text
+		if cursorOnLine {
+			line := tab.Buffer.Line(lineIdx)
+			editStyle := tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg)
+			sx := editorX
+			for _, ch := range line {
+				if sx >= editorX+maxWidth {
+					break
+				}
+				screen.SetContent(sx, screenY, ch, nil, editStyle)
+				sx++
+			}
 		}
 
 		// Queue the image for output after the draw cycle.
