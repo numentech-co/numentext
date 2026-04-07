@@ -2971,7 +2971,10 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 
 			// Draw the segment content
 			editorX := x + gutterW
-			if lineIdx < len(highlighted) {
+			if tab.MarkdownMode && segIdx == 0 && len(segs) == 1 {
+				// Single-segment line: use full markdown inline rendering (headers, bold, etc.)
+				e.drawMarkdownLine(screen, editorX, y+visualRow, editorWidth, lineIdx, tab)
+			} else if lineIdx < len(highlighted) {
 				e.drawHighlightedLineSegment(screen, editorX, y+visualRow, editorWidth, line, highlighted[lineIdx], lineIdx, tab, seg.startCol, seg.endCol)
 			} else {
 				e.drawPlainLineSegment(screen, editorX, y+visualRow, editorWidth, line, lineIdx, tab, seg.startCol, seg.endCol)
