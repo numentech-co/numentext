@@ -631,6 +631,32 @@ func detectImages(lines []string, claimed map[int]bool) []BlockInfo {
 		if claimed[i] {
 			continue
 		}
+		// Try multi-line image: ![alt](path split
+		//                       across lines)
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "![") && strings.Contains(trimmed, "](") && !strings.HasSuffix(trimmed, ")") {
+			// Look ahead for closing paren
+			for j := i + 1; j < len(lines) && j <= i+3; j++ {
+				if claimed[j] {
+					break
+				}
+				joined := strings.TrimSpace(line) + strings.TrimSpace(lines[j])
+				if alt, path, ok := ParseImageLine(joined); ok {
+					blocks = append(blocks, BlockInfo{
+						Type:      BlockImage,
+						StartLine: i,
+						EndLine:   j,
+						ImageAlt:  alt,
+						ImagePath: path,
+					})
+					for k := i; k <= j; k++ {
+						claimed[k] = true
+					}
+					break
+				}
+			}
+			continue
+		}
 		alt, path, ok := ParseImageLine(line)
 		if !ok {
 			continue
