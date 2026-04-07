@@ -42,33 +42,26 @@ func (e *Editor) flushPendingImages() {
 		return
 	}
 
-	// Clear previous image areas by overwriting with spaces.
-	// This prevents Sixel pixels from persisting after scroll.
-	for _, prev := range e.lastImageAreas {
-		for r := 0; r < prev.Height; r++ {
-			row := prev.ScreenRow + r + 1 // 1-based
-			col := prev.ScreenCol + 1
-			pos := fmt.Sprintf("\033[%d;%dH", row, col)
-			_, _ = fmt.Fprint(e.ttyFile, pos)
-			// Erase from cursor to end of line within the image width
-			_, _ = fmt.Fprintf(e.ttyFile, "\033[%dX", prev.Width)
-		}
-	}
-
-	// Record current image positions for next clear cycle
-	e.lastImageAreas = make([]PendingImage, len(e.pendingImages))
-	copy(e.lastImageAreas, e.pendingImages)
+	// Get the editor's visible area to clip images
+	_, editorY, _, editorH := e.GetInnerRect()
+	// Account for tab bar + breadcrumb
+	editorContentTop := editorY + 2
+	editorContentBottom := editorY + editorH
 
 	for _, img := range e.pendingImages {
 		if img.EncodedData == "" {
 			continue
 		}
-		// Skip images that would extend below the visible area
-		_, screenH := 0, 0
-		if e.ttyFile == os.Stdout {
-			// Can't determine screen size easily; just render
+
+		// Skip images that start outside the editor content area
+		if img.ScreenRow < editorContentTop || img.ScreenRow >= editorContentBottom {
+			continue
 		}
-		_ = screenH
+
+		// Skip images that would overflow past the editor bottom into output panel
+		if img.ScreenRow+img.Height > editorContentBottom {
+			continue
+		}
 
 		// ANSI cursor positioning: ESC [ row ; col H (1-based)
 		pos := fmt.Sprintf("\033[%d;%dH", img.ScreenRow+1, img.ScreenCol+1)

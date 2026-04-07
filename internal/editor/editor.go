@@ -182,8 +182,7 @@ type Editor struct {
 
 	// Pending inline images to render after tcell draw completes.
 	// Collected during Draw(), flushed at the end via raw escape sequences.
-	pendingImages  []PendingImage
-	lastImageAreas []PendingImage // previous frame's image positions for clearing
+	pendingImages []PendingImage
 
 	// ttyFile is a handle to /dev/tty (or os.Stdout on Windows) for writing
 	// raw escape sequences that bypass tcell's screen buffer.
