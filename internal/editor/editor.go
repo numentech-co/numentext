@@ -3017,7 +3017,9 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 		if tab.MarkdownMode && len(wrappedMdBlocks) > 0 {
 			if block := IsInBlock(wrappedMdBlocks, lineIdx); block != nil {
 				cursorInBlock := tab.CursorRow >= block.StartLine && tab.CursorRow <= block.EndLine
-				if !cursorInBlock {
+				// Always render image blocks (even when cursor is on them).
+				// Other blocks show raw content when cursor is inside for editing.
+				if !cursorInBlock || block.Type == BlockImage {
 					// If a new image starts while a float is active, end the previous float.
 					if block.Type == BlockImage && e.floatImageRows > 0 {
 						e.floatImageRows = 0
@@ -3036,20 +3038,16 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 					// Draw block line (with float offset for non-image blocks)
 					editorX := x + gutterW
 					e.drawMarkdownBlockLine(screen, editorX, y+visualRow, baseEditorWidth, lineIdx, tab, block, highlighted)
-					// Track cursor
+					// Track cursor (shift right for image anchor lines)
 					if lineIdx == tab.CursorRow {
-						cursorScreenX = editorX
+						if block.Type == BlockImage && e.floatImageCols > 0 {
+							cursorScreenX = editorX + e.floatImageCols + 1
+						} else {
+							cursorScreenX = editorX
+						}
 						cursorScreenY = y + visualRow
 					}
-					// drawImageLine now sets float state; no row reservation needed.
 					visualRow++
-					// Decrement float rows for this visual row.
-					if e.floatImageRows > 0 {
-						e.floatImageRows--
-						if e.floatImageRows <= 0 {
-							e.floatImageCols = 0
-						}
-					}
 					lineIdx++
 					continue
 				}
