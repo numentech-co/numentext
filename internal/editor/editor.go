@@ -3040,10 +3040,12 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 					e.drawMarkdownBlockLine(screen, editorX, y+visualRow, baseEditorWidth, lineIdx, tab, block, highlighted)
 					// Track cursor (shift right for image anchor lines)
 					if lineIdx == tab.CursorRow {
+						line := tab.Buffer.Line(lineIdx)
+						cursorCol := byteOffsetToScreenCol(line, tab.CursorCol, e.tabSize)
 						if block.Type == BlockImage && e.floatImageCols > 0 {
-							cursorScreenX = editorX + e.floatImageCols + 1
+							cursorScreenX = editorX + e.floatImageCols + 1 + cursorCol
 						} else {
-							cursorScreenX = editorX
+							cursorScreenX = editorX + cursorCol
 						}
 						cursorScreenY = y + visualRow
 					}
