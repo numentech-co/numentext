@@ -397,8 +397,9 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 		if editorH < 3 {
 			editorH = 3
 		}
-		maxAllowedW := (editorW * 8) / 3   // pixels (8px per cell)
-		maxAllowedH := (editorH * graphics.CellHeight()) / 3 // pixels
+		actualCellW, actualCellH := graphics.CellSize()
+		maxAllowedW := (editorW * actualCellW) / 3
+		maxAllowedH := (editorH * actualCellH) / 3
 
 		ci, err := e.imageCache.Load(block.ImagePath, basePath, maxAllowedW, e.graphicsCap, maxAllowedH)
 		if err == nil {
@@ -422,8 +423,9 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 	// post-draw output. Use floating layout: image on the left, text beside it.
 	if cachedImg != nil && cachedImg.Encoded != "" && e.graphicsCap != graphics.GraphicsNone {
 		// Image occupies up to 1/3 of editor width.
-		// Compute terminal columns from pixel width (8px per cell).
-		imgCols := (cachedImg.Width + 7) / 8
+		// Compute terminal columns from pixel width using actual cell dimensions.
+		cellW, _ := graphics.CellSize()
+		imgCols := (cachedImg.Width + cellW - 1) / cellW
 		maxImgCols := maxWidth / 3
 		if imgCols > maxImgCols {
 			imgCols = maxImgCols
