@@ -48,6 +48,12 @@ func (e *Editor) flushPendingImages() {
 	editorContentTop := editorY + 2
 	editorContentBottom := editorY + editorH
 
+	// For Kitty: delete all previously rendered images to prevent ghosts on scroll
+	if e.graphicsCap == graphics.GraphicsKitty {
+		// a=d,d=a deletes all images on the screen
+		_, _ = fmt.Fprint(e.ttyFile, "\x1b_Ga=d,d=a\x1b\\")
+	}
+
 	for _, img := range e.pendingImages {
 		if img.EncodedData == "" {
 			continue
