@@ -425,7 +425,7 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 		// Image occupies up to 1/3 of editor width.
 		// Compute terminal columns from pixel width using actual cell dimensions.
 		cellW, _ := graphics.CellSize()
-		imgCols := (cachedImg.Width + cellW - 1) / cellW
+		imgCols := (cachedImg.Width+cellW-1)/cellW + 2 // +2 padding to prevent text overlap
 		maxImgCols := maxWidth / 3
 		if imgCols > maxImgCols {
 			imgCols = maxImgCols
