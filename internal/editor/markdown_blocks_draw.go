@@ -439,23 +439,22 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 			screen.SetContent(cx, screenY, ' ', nil, style)
 		}
 
-		// Always show the ![alt](path) text to the right of the image.
-		// When cursor is on this line, the text is editable.
-		line := tab.Buffer.Line(lineIdx)
-		textStyle := tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorBg)
+		// Only show the ![alt](path) text beside the image when cursor is on this line.
 		if cursorOnLine {
-			textStyle = tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg)
-		}
-		sx := editorX + imgCols + 1
-		for _, ch := range line {
-			if sx >= editorX+maxWidth {
-				break
+			line := tab.Buffer.Line(lineIdx)
+			textStyle := tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg)
+			sx := editorX + imgCols + 1
+			for _, ch := range line {
+				if sx >= editorX+maxWidth {
+					break
+				}
+				screen.SetContent(sx, screenY, ch, nil, textStyle)
+				sx++
 			}
-			screen.SetContent(sx, screenY, ch, nil, textStyle)
-			sx++
 		}
 
 		// Queue the image for output after the draw cycle.
+		// Always render the image, even when cursor is on the anchor line.
 		e.pendingImages = append(e.pendingImages, PendingImage{
 			ScreenRow:   screenY,
 			ScreenCol:   editorX,
@@ -465,10 +464,9 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 			Protocol:    e.graphicsCap,
 		})
 
-		// Set floating image state so subsequent lines flow beside the image.
-		// Subtract 1 because the anchor line itself is already drawn.
+		// Reserve rows below the image (+1 for padding to prevent overlap).
 		e.floatImageCols = imgCols
-		e.floatImageRows = cachedImg.TermRows - 1
+		e.floatImageRows = cachedImg.TermRows
 		e.floatImageLineIdx = lineIdx
 
 		return true
