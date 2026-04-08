@@ -419,19 +419,30 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 	style := tcell.StyleDefault.Foreground(fg).Background(bg)
 
 	// If we have encoded image data (Sixel or Kitty), queue it for
-	// post-draw output. When cursor is on the line, still render the image
-	// but overlay the raw markdown text on top for editing.
+	// post-draw output. Use floating layout: image on the left, text beside it.
 	if cachedImg != nil && cachedImg.Encoded != "" && e.graphicsCap != graphics.GraphicsNone {
-		// Fill the line with background (clears any previous text).
+		// Image occupies up to 1/3 of editor width.
+		// Compute terminal columns from pixel width (8px per cell).
+		imgCols := (cachedImg.Width + 7) / 8
+		maxImgCols := maxWidth / 3
+		if imgCols > maxImgCols {
+			imgCols = maxImgCols
+		}
+		if imgCols < 1 {
+			imgCols = 1
+		}
+
+		// Fill the anchor line with background (clears any previous text).
 		for cx := editorX; cx < editorX+maxWidth; cx++ {
 			screen.SetContent(cx, screenY, ' ', nil, style)
 		}
 
 		// When cursor is on the image line, overlay the editable text
+		// in the text region beside the image.
 		if cursorOnLine {
 			line := tab.Buffer.Line(lineIdx)
 			editStyle := tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg)
-			sx := editorX
+			sx := editorX + imgCols + 1
 			for _, ch := range line {
 				if sx >= editorX+maxWidth {
 					break
@@ -445,11 +456,17 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 		e.pendingImages = append(e.pendingImages, PendingImage{
 			ScreenRow:   screenY,
 			ScreenCol:   editorX,
-			Width:       maxWidth,
+			Width:       imgCols,
 			Height:      cachedImg.TermRows,
 			EncodedData: cachedImg.Encoded,
 			Protocol:    e.graphicsCap,
 		})
+
+		// Set floating image state so subsequent lines flow beside the image.
+		// Subtract 1 because the anchor line itself is already drawn.
+		e.floatImageCols = imgCols
+		e.floatImageRows = cachedImg.TermRows - 1
+		e.floatImageLineIdx = lineIdx
 
 		return true
 	}

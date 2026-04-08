@@ -187,6 +187,12 @@ type Editor struct {
 	// ttyFile is a handle to /dev/tty (or os.Stdout on Windows) for writing
 	// raw escape sequences that bypass tcell's screen buffer.
 	ttyFile *os.File
+
+	// Floating image layout: when an image block is encountered during draw,
+	// subsequent text lines flow beside the image instead of below it.
+	floatImageCols    int // width in cells of the floating image (0 = no float active)
+	floatImageRows    int // remaining visual rows the float occupies
+	floatImageLineIdx int // buffer line index where the float anchor is
 }
 
 // PendingImage represents an inline image queued for rendering after the
@@ -2678,6 +2684,14 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		return
 	}
 
+	// Reset floating image state at the start of each draw.
+	e.floatImageCols = 0
+	e.floatImageRows = 0
+	e.floatImageLineIdx = 0
+
+	// Track float shift at cursor row for cursor positioning.
+	cursorFloatShift := 0
+
 	// Draw gutter + editor content
 	for row := 0; row < height; row++ {
 		lineIdx := tab.ScrollRow + row
@@ -2690,6 +2704,13 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		if lineIdx >= tab.Buffer.LineCount() {
 			// Draw tilde for empty lines
 			screen.SetContent(x+gutterW, y+row, '~', nil, tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorBg))
+			// Decrement float rows even for empty lines
+			if e.floatImageRows > 0 {
+				e.floatImageRows--
+				if e.floatImageRows <= 0 {
+					e.floatImageCols = 0
+				}
+			}
 			continue
 		}
 
@@ -2761,35 +2782,56 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		// Draw line content with syntax highlighting
 		line := tab.Buffer.Line(lineIdx)
 		editorX := x + gutterW
+		editorWidth := width - gutterW
+
+		// Apply floating image offset: shift text right when a float is active.
+		floatShift := 0
+		if e.floatImageRows > 0 && e.floatImageCols > 0 {
+			floatShift = e.floatImageCols + 1 // +1 for gap
+			editorX += floatShift
+			editorWidth -= floatShift
+			if editorWidth < 1 {
+				editorWidth = 1
+			}
+		}
+
+		// Remember float shift at cursor row for cursor positioning.
+		if lineIdx == tab.CursorRow {
+			cursorFloatShift = floatShift
+		}
 
 		// Check for markdown block rendering first (fenced code, tables, etc.)
 		mdHandled := false
 		if tab.MarkdownMode && mdBlocks != nil {
 			if block := IsInBlock(mdBlocks, lineIdx); block != nil {
-				mdHandled = e.drawMarkdownBlockLine(screen, editorX, y+row, width-gutterW, lineIdx, tab, block, highlighted)
-				// For image blocks, reserve rows for the image height
-				if mdHandled && block.Type == BlockImage && len(e.pendingImages) > 0 {
-					imgRows := e.pendingImages[len(e.pendingImages)-1].Height
-					if imgRows > 1 {
-						for r := 1; r < imgRows && row+r < height; r++ {
-							for cx := x; cx < x+width; cx++ {
-								screen.SetContent(cx, y+row+r, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
-							}
-						}
-						row += imgRows - 1 // -1 because the loop does row++ at the end
-					}
+				// If a new image starts while a float is active, end the previous float.
+				if block.Type == BlockImage && e.floatImageRows > 0 {
+					e.floatImageRows = 0
+					e.floatImageCols = 0
+					editorX = x + gutterW
+					editorWidth = width - gutterW
 				}
+				mdHandled = e.drawMarkdownBlockLine(screen, editorX, y+row, editorWidth, lineIdx, tab, block, highlighted)
+				// drawImageLine now sets e.floatImageCols/Rows; no row reservation needed.
 			}
 		}
 
 		if !mdHandled {
 			if tab.MarkdownMode && !e.wordWrap {
 				// Inline markdown rendering (bold, italic, headers, etc.)
-				e.drawMarkdownLine(screen, editorX, y+row, width-gutterW, lineIdx, tab)
+				e.drawMarkdownLine(screen, editorX, y+row, editorWidth, lineIdx, tab)
 			} else if lineIdx < len(highlighted) {
-				e.drawHighlightedLine(screen, editorX, y+row, width-gutterW, line, highlighted[lineIdx], lineIdx, tab)
+				e.drawHighlightedLine(screen, editorX, y+row, editorWidth, line, highlighted[lineIdx], lineIdx, tab)
 			} else {
-				e.drawPlainLine(screen, editorX, y+row, width-gutterW, line, lineIdx, tab)
+				e.drawPlainLine(screen, editorX, y+row, editorWidth, line, lineIdx, tab)
+			}
+		}
+
+		// Decrement floating image rows after each visual row.
+		if e.floatImageRows > 0 {
+			e.floatImageRows--
+			if e.floatImageRows <= 0 {
+				e.floatImageCols = 0
 			}
 		}
 	}
@@ -2799,7 +2841,7 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		line := tab.Buffer.Line(tab.CursorRow)
 		cursorCol := byteOffsetToScreenCol(line, tab.CursorCol, e.tabSize)
 		scrollCol := byteOffsetToScreenCol(line, tab.ScrollCol, e.tabSize)
-		cursorScreenX := x + gutterW + cursorCol - scrollCol
+		cursorScreenX := x + gutterW + cursorFloatShift + cursorCol - scrollCol
 		cursorScreenY := y + tab.CursorRow - tab.ScrollRow
 		if cursorScreenY >= y && cursorScreenY < y+height && cursorScreenX >= x+gutterW && cursorScreenX < x+width {
 			if e.keyMode.CursorStyle() == keymode.CursorBlock {
@@ -2935,15 +2977,20 @@ func (e *Editor) drawScrollbar(screen tcell.Screen, x, y, height int, tab *Tab) 
 
 // drawWrapped renders the editor content with word wrapping enabled.
 func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW int, tab *Tab, highlighted []HighlightedLine) {
-	editorWidth := width - gutterW
-	if editorWidth < 1 {
-		editorWidth = 1
+	baseEditorWidth := width - gutterW
+	if baseEditorWidth < 1 {
+		baseEditorWidth = 1
 	}
 
 	cursorScreenX := -1
 	cursorScreenY := -1
 	visualRow := 0
 	lineIdx := tab.ScrollRow
+
+	// Reset floating image state at the start of each draw.
+	e.floatImageCols = 0
+	e.floatImageRows = 0
+	e.floatImageLineIdx = 0
 
 	// Get markdown blocks for word-wrap mode too
 	var wrappedMdBlocks []BlockInfo
@@ -2954,11 +3001,29 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 	for visualRow < height && lineIdx < tab.Buffer.LineCount() {
 		line := tab.Buffer.Line(lineIdx)
 
+		// Compute current editor offset and width, accounting for active float.
+		floatShift := 0
+		curEditorWidth := baseEditorWidth
+		if e.floatImageRows > 0 && e.floatImageCols > 0 {
+			floatShift = e.floatImageCols + 1 // +1 for gap
+			curEditorWidth = baseEditorWidth - floatShift
+			if curEditorWidth < 1 {
+				curEditorWidth = 1
+			}
+		}
+
 		// Check for markdown block rendering in word-wrap mode
 		if tab.MarkdownMode && len(wrappedMdBlocks) > 0 {
 			if block := IsInBlock(wrappedMdBlocks, lineIdx); block != nil {
 				cursorInBlock := tab.CursorRow >= block.StartLine && tab.CursorRow <= block.EndLine
 				if !cursorInBlock {
+					// If a new image starts while a float is active, end the previous float.
+					if block.Type == BlockImage && e.floatImageRows > 0 {
+						e.floatImageRows = 0
+						e.floatImageCols = 0
+						floatShift = 0
+						curEditorWidth = baseEditorWidth
+					}
 					// Clear line
 					for cx := x; cx < x+width; cx++ {
 						screen.SetContent(cx, y+visualRow, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
@@ -2967,30 +3032,22 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 					if e.showLineNumbers {
 						e.drawGutterForLine(screen, x, y+visualRow, gutterW, lineIdx, tab)
 					}
-					// Draw block line
-					editorX := x + gutterW
-					e.drawMarkdownBlockLine(screen, editorX, y+visualRow, editorWidth, lineIdx, tab, block, highlighted)
+					// Draw block line (with float offset for non-image blocks)
+					editorX := x + gutterW + floatShift
+					e.drawMarkdownBlockLine(screen, editorX, y+visualRow, curEditorWidth, lineIdx, tab, block, highlighted)
 					// Track cursor
 					if lineIdx == tab.CursorRow {
-						cursorScreenX = x + gutterW
+						cursorScreenX = editorX
 						cursorScreenY = y + visualRow
 					}
-					// For image blocks, reserve rows for the image height
-					if block.Type == BlockImage && len(e.pendingImages) > 0 {
-						imgRows := e.pendingImages[len(e.pendingImages)-1].Height
-						if imgRows > 1 {
-							// Clear the reserved rows so text doesn't show through
-							for r := 1; r < imgRows && visualRow+r < height; r++ {
-								for cx := x; cx < x+width; cx++ {
-									screen.SetContent(cx, y+visualRow+r, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
-								}
-							}
-							visualRow += imgRows
-						} else {
-							visualRow++
+					// drawImageLine now sets float state; no row reservation needed.
+					visualRow++
+					// Decrement float rows for this visual row.
+					if e.floatImageRows > 0 {
+						e.floatImageRows--
+						if e.floatImageRows <= 0 {
+							e.floatImageCols = 0
 						}
-					} else {
-						visualRow++
 					}
 					lineIdx++
 					continue
@@ -2998,7 +3055,7 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 			}
 		}
 
-		segs := wrapLine(line, editorWidth, e.tabSize)
+		segs := wrapLine(line, curEditorWidth, e.tabSize)
 
 		for segIdx, seg := range segs {
 			if visualRow >= height {
@@ -3023,15 +3080,15 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 				}
 			}
 
-			// Draw the segment content
-			editorX := x + gutterW
+			// Draw the segment content (shifted right if float is active)
+			editorX := x + gutterW + floatShift
 			if tab.MarkdownMode && segIdx == 0 && len(segs) == 1 {
 				// Single-segment line: use full markdown inline rendering (headers, bold, etc.)
-				e.drawMarkdownLine(screen, editorX, y+visualRow, editorWidth, lineIdx, tab)
+				e.drawMarkdownLine(screen, editorX, y+visualRow, curEditorWidth, lineIdx, tab)
 			} else if lineIdx < len(highlighted) {
-				e.drawHighlightedLineSegment(screen, editorX, y+visualRow, editorWidth, line, highlighted[lineIdx], lineIdx, tab, seg.startCol, seg.endCol)
+				e.drawHighlightedLineSegment(screen, editorX, y+visualRow, curEditorWidth, line, highlighted[lineIdx], lineIdx, tab, seg.startCol, seg.endCol)
 			} else {
-				e.drawPlainLineSegment(screen, editorX, y+visualRow, editorWidth, line, lineIdx, tab, seg.startCol, seg.endCol)
+				e.drawPlainLineSegment(screen, editorX, y+visualRow, curEditorWidth, line, lineIdx, tab, seg.startCol, seg.endCol)
 			}
 
 			// Track cursor position (convert byte offsets to screen columns)
@@ -3047,6 +3104,25 @@ func (e *Editor) drawWrapped(screen tcell.Screen, x, y, width, height, gutterW i
 			}
 
 			visualRow++
+
+			// Decrement floating image rows for each visual row consumed.
+			if e.floatImageRows > 0 {
+				e.floatImageRows--
+				if e.floatImageRows <= 0 {
+					e.floatImageCols = 0
+				}
+				// Recompute float shift for next segment of same line.
+				if e.floatImageRows > 0 && e.floatImageCols > 0 {
+					floatShift = e.floatImageCols + 1
+					curEditorWidth = baseEditorWidth - floatShift
+					if curEditorWidth < 1 {
+						curEditorWidth = 1
+					}
+				} else {
+					floatShift = 0
+					curEditorWidth = baseEditorWidth
+				}
+			}
 		}
 		lineIdx++
 	}

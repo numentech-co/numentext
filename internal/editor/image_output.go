@@ -109,3 +109,32 @@ func (e *Editor) ClearPendingImages() {
 func EstimateCellHeight() int {
 	return graphics.CellHeight()
 }
+
+// FloatImageCols returns the current floating image width in cells (0 = no float).
+func (e *Editor) FloatImageCols() int {
+	return e.floatImageCols
+}
+
+// FloatImageRows returns the remaining visual rows the float occupies.
+func (e *Editor) FloatImageRows() int {
+	return e.floatImageRows
+}
+
+// FloatImageLineIdx returns the buffer line index of the float anchor.
+func (e *Editor) FloatImageLineIdx() int {
+	return e.floatImageLineIdx
+}
+
+// SetFloatImage sets the floating image state directly (for testing).
+func (e *Editor) SetFloatImage(cols, rows, lineIdx int) {
+	e.floatImageCols = cols
+	e.floatImageRows = rows
+	e.floatImageLineIdx = lineIdx
+}
+
+// ClearFloatImage resets the floating image state.
+func (e *Editor) ClearFloatImage() {
+	e.floatImageCols = 0
+	e.floatImageRows = 0
+	e.floatImageLineIdx = 0
+}

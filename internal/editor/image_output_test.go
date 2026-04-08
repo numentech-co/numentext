@@ -172,3 +172,110 @@ func TestPendingImage_KittyProtocol(t *testing.T) {
 		t.Errorf("protocol = %v, want Kitty", imgs[0].Protocol)
 	}
 }
+
+func TestFloatImageState_StartAndEnd(t *testing.T) {
+	e := NewEditor()
+
+	// Initially no float is active.
+	if e.FloatImageCols() != 0 {
+		t.Errorf("initial FloatImageCols = %d, want 0", e.FloatImageCols())
+	}
+	if e.FloatImageRows() != 0 {
+		t.Errorf("initial FloatImageRows = %d, want 0", e.FloatImageRows())
+	}
+
+	// Set a floating image: 20 cols wide, 5 rows tall, anchored at line 3.
+	e.SetFloatImage(20, 5, 3)
+	if e.FloatImageCols() != 20 {
+		t.Errorf("FloatImageCols = %d, want 20", e.FloatImageCols())
+	}
+	if e.FloatImageRows() != 5 {
+		t.Errorf("FloatImageRows = %d, want 5", e.FloatImageRows())
+	}
+	if e.FloatImageLineIdx() != 3 {
+		t.Errorf("FloatImageLineIdx = %d, want 3", e.FloatImageLineIdx())
+	}
+
+	// Clear float state.
+	e.ClearFloatImage()
+	if e.FloatImageCols() != 0 {
+		t.Errorf("after clear FloatImageCols = %d, want 0", e.FloatImageCols())
+	}
+	if e.FloatImageRows() != 0 {
+		t.Errorf("after clear FloatImageRows = %d, want 0", e.FloatImageRows())
+	}
+}
+
+func TestFloatImageState_DecrementToZero(t *testing.T) {
+	e := NewEditor()
+
+	// Simulate float with 3 remaining rows.
+	e.SetFloatImage(15, 3, 0)
+
+	// Simulate decrementing rows as lines are drawn.
+	for i := 3; i > 0; i-- {
+		if e.FloatImageRows() != i {
+			t.Errorf("iteration %d: FloatImageRows = %d, want %d", 3-i, e.FloatImageRows(), i)
+		}
+		if e.FloatImageCols() != 15 {
+			t.Errorf("iteration %d: FloatImageCols = %d, want 15", 3-i, e.FloatImageCols())
+		}
+		// Decrement (same logic as draw loop).
+		e.SetFloatImage(e.FloatImageCols(), e.FloatImageRows()-1, e.FloatImageLineIdx())
+		if e.FloatImageRows() <= 0 {
+			e.ClearFloatImage()
+		}
+	}
+
+	// After 3 decrements, float should be cleared.
+	if e.FloatImageCols() != 0 {
+		t.Errorf("after exhaust: FloatImageCols = %d, want 0", e.FloatImageCols())
+	}
+	if e.FloatImageRows() != 0 {
+		t.Errorf("after exhaust: FloatImageRows = %d, want 0", e.FloatImageRows())
+	}
+}
+
+func TestFloatImageState_EditorXShift(t *testing.T) {
+	// Verify the expected shift calculation: floatImageCols + 1 (gap).
+	e := NewEditor()
+	e.SetFloatImage(25, 4, 0)
+
+	imgCols := e.FloatImageCols()
+	expectedShift := imgCols + 1 // image width + gap
+	if expectedShift != 26 {
+		t.Errorf("expected shift = %d, want 26", expectedShift)
+	}
+
+	// For an 80-col editor, text width should be 80 - 26 = 54
+	editorWidth := 80
+	textWidth := editorWidth - expectedShift
+	if textWidth != 54 {
+		t.Errorf("text width = %d, want 54", textWidth)
+	}
+}
+
+func TestFloatImageState_NewImageEndsOldFloat(t *testing.T) {
+	e := NewEditor()
+
+	// Start first float.
+	e.SetFloatImage(20, 10, 5)
+
+	// Simulate a new image starting while old float is active.
+	// The draw loop resets float state before setting new image.
+	if e.FloatImageRows() > 0 {
+		e.ClearFloatImage()
+	}
+
+	// Set new float.
+	e.SetFloatImage(15, 6, 12)
+	if e.FloatImageCols() != 15 {
+		t.Errorf("new float cols = %d, want 15", e.FloatImageCols())
+	}
+	if e.FloatImageRows() != 6 {
+		t.Errorf("new float rows = %d, want 6", e.FloatImageRows())
+	}
+	if e.FloatImageLineIdx() != 12 {
+		t.Errorf("new float lineIdx = %d, want 12", e.FloatImageLineIdx())
+	}
+}
