@@ -136,8 +136,9 @@ func (ic *ImageCache) Load(path string, basePath string, maxWidthPx int, cap Gra
 	resized := image.NewRGBA(image.Rect(0, 0, newW, newH))
 	draw.CatmullRom.Scale(resized, resized.Bounds(), img, bounds, draw.Over, nil)
 
-	// Calculate terminal rows.
-	termRows := (newH + cellHeight - 1) / cellHeight
+	// Calculate terminal rows using actual cell dimensions.
+	_, actualCellH := CellSize()
+	termRows := (newH + actualCellH - 1) / actualCellH
 	if termRows < 1 {
 		termRows = 1
 	}
