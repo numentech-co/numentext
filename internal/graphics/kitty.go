@@ -56,8 +56,8 @@ func EncodeKitty(img *image.RGBA) (string, error) {
 		}
 
 		if i == 0 {
-			// First chunk includes format and size metadata.
-			fmt.Fprintf(&sb, "\x1b_Gf=100,t=d,s=%d,v=%d,m=%d;%s\x1b\\", w, h, m, chunk)
+			// First chunk: action=T (transmit+display), format=100 (PNG), direct data.
+			fmt.Fprintf(&sb, "\x1b_Ga=T,f=100,t=d,s=%d,v=%d,m=%d;%s\x1b\\", w, h, m, chunk)
 		} else {
 			// Continuation chunks only specify m.
 			fmt.Fprintf(&sb, "\x1b_Gm=%d;%s\x1b\\", m, chunk)
