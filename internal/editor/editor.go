@@ -2689,11 +2689,24 @@ func (e *Editor) Draw(screen tcell.Screen) {
 	e.floatImageRows = 0
 	e.floatImageLineIdx = 0
 
-	// Track float shift at cursor row for cursor positioning.
+	// Track cursor screen position (set during draw loop).
+	cursorScreenXOverride := -1
+	cursorScreenYOverride := -1
+	imageShiftForCursor := 0
 
-	// Draw gutter + editor content
+	// Draw gutter + editor content.
+	// lineIdx advances independently of row because images reserve extra visual rows.
+	lineIdx := tab.ScrollRow
 	for row := 0; row < height; row++ {
-		lineIdx := tab.ScrollRow + row
+		// If a floating image is active, skip this visual row (image occupies it).
+		if e.floatImageRows > 0 {
+			e.floatImageRows--
+			// Clear the row so no stale text shows through
+			for cx := x; cx < x+width; cx++ {
+				screen.SetContent(cx, y+row, ' ', nil, tcell.StyleDefault.Background(ui.ColorBg))
+			}
+			continue
+		}
 
 		// Clear the line
 		for cx := x; cx < x+width; cx++ {
@@ -2703,13 +2716,6 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		if lineIdx >= tab.Buffer.LineCount() {
 			// Draw tilde for empty lines
 			screen.SetContent(x+gutterW, y+row, '~', nil, tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorBg))
-			// Decrement float rows even for empty lines
-			if e.floatImageRows > 0 {
-				e.floatImageRows--
-				if e.floatImageRows <= 0 {
-					e.floatImageCols = 0
-				}
-			}
 			continue
 		}
 
@@ -2799,11 +2805,8 @@ func (e *Editor) Draw(screen tcell.Screen) {
 				if block.Type == BlockImage && e.floatImageRows > 0 {
 					e.floatImageRows = 0
 					e.floatImageCols = 0
-					editorX = x + gutterW
-					editorWidth = width - gutterW
 				}
-				mdHandled = e.drawMarkdownBlockLine(screen, editorX, y+row, editorWidth, lineIdx, tab, block, highlighted)
-				// drawImageLine now sets e.floatImageCols/Rows; no row reservation needed.
+				mdHandled = e.drawMarkdownBlockLine(screen, editorX, y+row, width-gutterW, lineIdx, tab, block, highlighted)
 			}
 		}
 
@@ -2818,6 +2821,17 @@ func (e *Editor) Draw(screen tcell.Screen) {
 			}
 		}
 
+		// Track cursor position for this line
+		if lineIdx == tab.CursorRow {
+			cursorScreenYOverride = y + row
+			imageShiftForCursor = 0
+			// If this line is an image anchor, shift cursor to the right of the image
+			if e.floatImageCols > 0 && e.floatImageLineIdx == lineIdx {
+				imageShiftForCursor = e.floatImageCols + 1
+			}
+		}
+
+		lineIdx++
 	}
 
 	// Draw cursor only when focused
@@ -2825,8 +2839,12 @@ func (e *Editor) Draw(screen tcell.Screen) {
 		line := tab.Buffer.Line(tab.CursorRow)
 		cursorCol := byteOffsetToScreenCol(line, tab.CursorCol, e.tabSize)
 		scrollCol := byteOffsetToScreenCol(line, tab.ScrollCol, e.tabSize)
-		cursorScreenX := x + gutterW + cursorCol - scrollCol
-		cursorScreenY := y + tab.CursorRow - tab.ScrollRow
+		cursorScreenX := x + gutterW + imageShiftForCursor + cursorCol - scrollCol
+		cursorScreenY := cursorScreenYOverride
+		if cursorScreenY < 0 {
+			cursorScreenY = y + tab.CursorRow - tab.ScrollRow
+		}
+		_ = cursorScreenXOverride // reserved for future use
 		if cursorScreenY >= y && cursorScreenY < y+height && cursorScreenX >= x+gutterW && cursorScreenX < x+width {
 			if e.keyMode.CursorStyle() == keymode.CursorBlock {
 				// Block cursor: draw char at cursor position with reversed colors
