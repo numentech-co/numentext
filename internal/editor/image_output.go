@@ -30,15 +30,17 @@ func openTTY() *os.File {
 // Each image is positioned using ANSI cursor movement (ESC[row;colH) and
 // then the Sixel or Kitty escape sequence data is written.
 func (e *Editor) flushPendingImages() {
+	if e.graphicsCap == graphics.GraphicsNone || e.ttyFile == nil {
+		e.pendingImages = nil
+		return
+	}
+
+	// For Kitty: always delete all previously rendered images to prevent ghosts on scroll
+	if e.graphicsCap == graphics.GraphicsKitty {
+		_, _ = fmt.Fprint(e.ttyFile, "\x1b_Ga=d,d=a\x1b\\")
+	}
+
 	if len(e.pendingImages) == 0 {
-		return
-	}
-	if e.graphicsCap == graphics.GraphicsNone {
-		e.pendingImages = nil
-		return
-	}
-	if e.ttyFile == nil {
-		e.pendingImages = nil
 		return
 	}
 
@@ -47,12 +49,6 @@ func (e *Editor) flushPendingImages() {
 	// Account for tab bar + breadcrumb
 	editorContentTop := editorY + 2
 	editorContentBottom := editorY + editorH
-
-	// For Kitty: delete all previously rendered images to prevent ghosts on scroll
-	if e.graphicsCap == graphics.GraphicsKitty {
-		// a=d,d=a deletes all images on the screen
-		_, _ = fmt.Fprint(e.ttyFile, "\x1b_Ga=d,d=a\x1b\\")
-	}
 
 	for _, img := range e.pendingImages {
 		if img.EncodedData == "" {
