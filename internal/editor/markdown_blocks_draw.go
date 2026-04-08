@@ -439,19 +439,20 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 			screen.SetContent(cx, screenY, ' ', nil, style)
 		}
 
-		// When cursor is on the image line, overlay the editable text
-		// in the text region beside the image.
+		// Always show the ![alt](path) text to the right of the image.
+		// When cursor is on this line, the text is editable.
+		line := tab.Buffer.Line(lineIdx)
+		textStyle := tcell.StyleDefault.Foreground(ui.ColorTextMuted).Background(ui.ColorBg)
 		if cursorOnLine {
-			line := tab.Buffer.Line(lineIdx)
-			editStyle := tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg)
-			sx := editorX + imgCols + 1
-			for _, ch := range line {
-				if sx >= editorX+maxWidth {
-					break
-				}
-				screen.SetContent(sx, screenY, ch, nil, editStyle)
-				sx++
+			textStyle = tcell.StyleDefault.Foreground(ui.ColorTextPrimary).Background(ui.ColorBg)
+		}
+		sx := editorX + imgCols + 1
+		for _, ch := range line {
+			if sx >= editorX+maxWidth {
+				break
 			}
+			screen.SetContent(sx, screenY, ch, nil, textStyle)
+			sx++
 		}
 
 		// Queue the image for output after the draw cycle.
