@@ -406,14 +406,6 @@ func (e *Editor) drawImageLine(screen tcell.Screen, editorX, screenY, maxWidth i
 			imgWidth = ci.OrigWidth
 			imgHeight = ci.OrigHeight
 			cachedImg = ci
-			// Clamp TermRows to 1/3 of visible editor height
-			maxRows := editorH / 3
-			if maxRows < 1 {
-				maxRows = 1
-			}
-			if cachedImg.TermRows > maxRows {
-				cachedImg.TermRows = maxRows
-			}
 		}
 	}
 

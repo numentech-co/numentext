@@ -98,31 +98,30 @@ func (ic *ImageCache) Load(path string, basePath string, maxWidthPx int, cap Gra
 	origW := bounds.Dx()
 	origH := bounds.Dy()
 
-	// Resize to fit within maxWidthPx and maxHeightPx, preserving aspect ratio.
-	// Never scale up -- only scale down if the image exceeds either limit.
-	// Find the most constraining scale factor and apply uniformly.
+	// Resize preserving aspect ratio. Never scale up.
+	// Determine the dominant dimension and constrain by the corresponding max.
 	newW := origW
 	newH := origH
 
-	scaleW := 1.0
-	scaleH := 1.0
-
-	if maxWidthPx > 0 && origW > maxWidthPx {
-		scaleW = float64(maxWidthPx) / float64(origW)
-	}
-	if len(maxHeightPx) > 0 && maxHeightPx[0] > 0 && origH > maxHeightPx[0] {
-		scaleH = float64(maxHeightPx[0]) / float64(origH)
+	maxH := 0
+	if len(maxHeightPx) > 0 {
+		maxH = maxHeightPx[0]
 	}
 
-	// Use the smaller scale factor (more constraining dimension)
-	scale := scaleW
-	if scaleH < scale {
-		scale = scaleH
-	}
-
-	if scale < 1.0 {
-		newW = int(float64(origW) * scale)
-		newH = int(float64(origH) * scale)
+	if origW > origH {
+		// Landscape: constrain by width
+		if maxWidthPx > 0 && origW > maxWidthPx {
+			scale := float64(maxWidthPx) / float64(origW)
+			newW = int(float64(origW) * scale)
+			newH = int(float64(origH) * scale)
+		}
+	} else {
+		// Portrait or square: constrain by height
+		if maxH > 0 && origH > maxH {
+			scale := float64(maxH) / float64(origH)
+			newW = int(float64(origW) * scale)
+			newH = int(float64(origH) * scale)
+		}
 	}
 
 	if newW <= 0 {
