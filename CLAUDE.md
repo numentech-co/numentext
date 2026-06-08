@@ -1,19 +1,33 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # NumenText
 
-Terminal-based IDE written in Go, inspired by Borland C++/Turbo C.
+Terminal-based IDE written in Go (module `numentext`, requires Go 1.25+), inspired by Borland C++/Turbo C. Single binary, no runtime dependencies; delegates language intelligence to LSP/DAP rather than reimplementing it.
 
 ## Development Workflow
 
 This project uses the [Artifex](https://github.com/numentech-co/artifex) structured development toolkit. Requirements are written as markdown, converted to tickets, and implemented through the ticket-implementation agent workflow with validation gates. Use `/next-ticket`, `/mark-done`, and `/ticket-status` slash commands to manage work.
 
-## Build & Run
+## Build, Run & Test
 
 ```
-go build -o numentext .
+go build -o numentext .          # or: make build
 ./numentext [file...]
 ```
 
-Verify changes compile with `go build ./...`, `go vet ./...`, and `go test ./...`.
+Verification (all three must pass; mirrors CI in `.github/workflows/ci.yml`, run on ubuntu + macOS):
+
+```
+go build ./...
+go vet ./...
+go test ./...                    # make test runs with -count=1
+```
+
+Run a single package's tests: `go test ./internal/editor/`. Run one test: `go test ./internal/runner/ -run TestParseGoError`.
+
+The Makefile also provides cross-compile targets: `make build-linux`, `make build-darwin-arm64`, `make build-all`.
 
 ## Architecture
 
@@ -28,11 +42,14 @@ internal/
     buffer.go                  Line-based text buffer with undo/redo stack
     highlight.go               Chroma integration, per-character styling
     keymap.go                  tcell.EventKey -> Action enum mapping
+    keymode/                   Pluggable editing modes: default, vi (vi_command/vi_operators), helix
+    completion.go              LSP-backed autocomplete popup
     gutter.go                  Line number formatting
     bracket.go                 Bracket matching and highlighting
     markdown.go                Inline markdown rendering (bold, italic, headers, links, code)
     markdown_blocks.go         Block markdown rendering (code blocks, tables, blockquotes, lists)
     markdown_blocks_draw.go    Block element Draw methods
+    image_output.go            Inline image rendering in editor (floating layout, terminal graphics)
     tools.go                   External formatter/linter execution
     diffmarkers.go             Diff change type enum for gutter markers
   ui/
@@ -40,6 +57,9 @@ internal/
     menubar.go                 Horizontal menu with dropdown submenus
     statusbar.go               Bottom bar: file info, cursor pos, shortcuts
     dialog.go                  Modal dialogs: Open, Save As, Find, Replace, Go to Line, Confirm
+    palette.go                 Command palette (Ctrl+Shift+P)
+    file_palette.go            Quick file open (Ctrl+P)
+    search_palette.go          Search-in-files results palette
     theme.go                   Color constants (semantic names)
     themes.go                  4 built-in themes + ApplyTheme
     style.go                   Style registry (modern/classic, icon sets, terminal detection)
@@ -58,7 +78,10 @@ internal/
   dap/                         DAP client for debugging
   hexview/hexview.go           Binary hex viewer/editor (two-pane)
   diffview/                    Side-by-side diff viewer with word-level diffs
-  graphics/                    Image loading, Sixel/Kitty encoding, capability detection
+  graphics/                    Image loading + terminal graphics; per-protocol encoders
+    detect.go                  Terminal capability detection (Kitty/iTerm2/Sixel support)
+    kitty.go, iterm.go, sixel.go  Protocol-specific image encoders
+    cellsize.go                Pixel-per-cell measurement for image sizing
   plugin/                      Lua plugin system (gopher-lua)
     manager.go                 Plugin loading, manifest parsing, lifecycle
     luaruntime.go              Sandboxed Lua VM with timeout
@@ -76,6 +99,9 @@ internal/
 - Editor renders directly to `tcell.Screen` in its `Draw()` method, not via tview widgets
 - Syntax highlighting is cached; invalidated via `hlVersion` counter on content/tab changes
 - Global input capture in app.go handles shortcuts via unified Ctrl+letter handler that normalizes across terminal key encodings
+- Editing behavior is pluggable via `editor/keymode`: a default (non-modal) mode plus modal vi and helix modes, cycled with Ctrl+Shift+M. Keys not consumed by the active mode fall through to the standard keymap
+- Terminal images: `graphics/detect.go` picks the best protocol the terminal supports (Kitty > iTerm2 > Sixel); the encoders emit escape sequences written directly to the screen. Kitty images must be explicitly deleted before redraw to avoid scroll ghosts
+- Markdown image previews use a floating layout: the image occupies real editor rows and decouples visual rows from buffer lines (see `editor/image_output.go`)
 - Clipboard uses `os/exec` to pbcopy/pbpaste (macOS) or xclip (Linux)
 - Run/build executes async in a goroutine, updates UI via `QueueUpdateDraw`
 - Dialog overlays use `tview.Pages` layered on top of the "main" page
